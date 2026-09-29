@@ -1,0 +1,35 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# 打包产物
+release
+.cache
+
+# 图标栅格化产物，由 scripts/make-icons.mjs 从 public/icon.svg 生成
+assets/icons
+
+# 本地临时探针与实机冒烟脚本，不进版本库
+scripts/_*_tmp.*
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.trae
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

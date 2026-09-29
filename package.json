@@ -1,0 +1,39 @@
+{
+  "name": "mushoku-life-simulator",
+  "private": true,
+  "version": "0.1.0",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "description": "基于《无职转生》世界观的文字人生模拟器。可二次开发，禁止商用。",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview",
+    "icons": "node scripts/make-icons.mjs",
+    "electron:dev": "npm run build && npm run icons && electron .",
+    "dist:win": "npm run build && node scripts/build-win-portable.mjs"
+  },
+  "dependencies": {
+    "echarts": "^6.1.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-markdown": "^10.1.0",
+    "rehype-slug": "^6.0.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "adm-zip": "^0.6.1",
+    "electron": "^44.4.5",
+    "oxlint": "^1.81.0",
+    "resedit": "^3.1.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0"
+  }
+}

@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="无职转生：人生模拟器">
+  <title>无职转生：人生模拟器</title>
+  <defs>
+    <!-- 底面：深夜蓝到近黑的斜向渐变，模拟抛光石材 -->
+    <linearGradient id="tile" x1="0" y1="0" x2="0.38" y2="1">
+      <stop offset="0" stop-color="#18244f" />
+      <stop offset="0.46" stop-color="#0c1128" />
+      <stop offset="1" stop-color="#06080f" />
+    </linearGradient>
+
+    <!-- 左上高光 -->
+    <radialGradient id="sheen" cx="0.26" cy="0.14" r="0.78">
+      <stop offset="0" stop-color="#6e83d8" stop-opacity="0.5" />
+      <stop offset="0.55" stop-color="#3a4a8f" stop-opacity="0.14" />
+      <stop offset="1" stop-color="#3a4a8f" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- 四角压暗 -->
+    <radialGradient id="vignette" cx="0.5" cy="0.52" r="0.76">
+      <stop offset="0.55" stop-color="#000000" stop-opacity="0" />
+      <stop offset="1" stop-color="#000000" stop-opacity="0.52" />
+    </radialGradient>
+
+    <!-- 顶部玻璃反光 -->
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.14" />
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0" />
+    </linearGradient>
+
+    <!-- 金：符文环、护手、杖上的箍 -->
+    <linearGradient id="gold" x1="0" y1="0" x2="0.2" y2="1">
+      <stop offset="0" stop-color="#fbeec4" />
+      <stop offset="0.4" stop-color="#e6bc6c" />
+      <stop offset="0.74" stop-color="#b98b32" />
+      <stop offset="1" stop-color="#8a6420" />
+    </linearGradient>
+
+    <!-- 剑身：冷钢，左亮右沉 -->
+    <linearGradient id="steel" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff" />
+      <stop offset="0.28" stop-color="#eaf0fa" />
+      <stop offset="0.62" stop-color="#b7c3d8" />
+      <stop offset="1" stop-color="#7c88a3" />
+    </linearGradient>
+
+    <!-- 杖身：深色木料，带一道纵向高光 -->
+    <linearGradient id="wood" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7b5a34" />
+      <stop offset="0.4" stop-color="#4f3720" />
+      <stop offset="1" stop-color="#2b1d10" />
+    </linearGradient>
+
+    <!-- 杖顶的水魔石：取自鲁迪乌斯那根「傲慢的水龙王」 -->
+    <radialGradient id="aqua" cx="0.34" cy="0.28" r="0.8">
+      <stop offset="0" stop-color="#f0ffff" />
+      <stop offset="0.3" stop-color="#8ef0f6" />
+      <stop offset="0.68" stop-color="#2b9dc4" />
+      <stop offset="1" stop-color="#0d3d63" />
+    </radialGradient>
+
+    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="6" />
+    </filter>
+    <filter id="tiny" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="2.4" />
+    </filter>
+
+    <clipPath id="tileClip">
+      <rect x="0" y="0" width="256" height="256" rx="58" />
+    </clipPath>
+  </defs>
+
+  <!-- 底板 -->
+  <rect x="0" y="0" width="256" height="256" rx="58" fill="url(#tile)" />
+
+  <g clip-path="url(#tileClip)">
+    <rect x="0" y="0" width="256" height="256" fill="url(#sheen)" />
+    <rect x="0" y="0" width="256" height="256" fill="url(#vignette)" />
+    <rect x="10" y="8" width="236" height="96" rx="46" fill="url(#gloss)" />
+  </g>
+
+  <!-- 内描边 -->
+  <rect x="5.5" y="5.5" width="245" height="245" rx="53.5" fill="none" stroke="#f0d9a0" stroke-opacity="0.16" stroke-width="1.4" />
+
+  <!-- 背后的魔术阵：一道细虚线环 -->
+  <circle cx="128" cy="128" r="100" fill="none" stroke="#e8c67c" stroke-opacity="0.16" stroke-width="1.2" stroke-dasharray="2 10" />
+
+  <!-- 符文环的外发光 -->
+  <circle cx="128" cy="128" r="73" fill="none" stroke="#f4dda6" stroke-opacity="0.2" stroke-width="11" filter="url(#soft)" />
+
+  <!-- 七道符文刻度 -->
+  <g fill="url(#gold)">
+    <rect x="125.4" y="40" width="5.2" height="12" rx="2.6" transform="rotate(12.9 128 128)" />
+    <rect x="125.4" y="40" width="5.2" height="12" rx="2.6" transform="rotate(64.3 128 128)" />
+    <rect x="125.4" y="40" width="5.2" height="12" rx="2.6" transform="rotate(115.7 128 128)" />
+    <rect x="125.4" y="40" width="5.2" height="12" rx="2.6" transform="rotate(167.1 128 128)" />
+    <rect x="125.4" y="40" width="5.2" height="12" rx="2.6" transform="rotate(218.6 128 128)" />
+    <rect x="125.4" y="40" width="5.2" height="12" rx="2.6" transform="rotate(270 128 128)" />
+    <rect x="125.4" y="40" width="5.2" height="12" rx="2.6" transform="rotate(321.4 128 128)" />
+  </g>
+
+  <!-- 主环 -->
+  <circle cx="128" cy="128" r="73" fill="none" stroke="url(#gold)" stroke-width="5.2" />
+  <circle cx="128" cy="128" r="73" fill="none" stroke="#fff6dd" stroke-opacity="0.35" stroke-width="1.2" />
+
+  <!-- 魔杖「傲慢的水龙王」：杖顶朝左上 -->
+  <g transform="rotate(-45 128 128)">
+    <path d="M128 44 L141 70 L141 206 L115 206 L115 70 Z" fill="#000000" fill-opacity="0.4" filter="url(#tiny)" transform="translate(3 4)" />
+
+    <!-- 杖身 -->
+    <rect x="123" y="92" width="10" height="106" rx="5" fill="url(#wood)" />
+    <rect x="125" y="96" width="2.8" height="98" rx="1.4" fill="#c9a97a" fill-opacity="0.45" />
+    <!-- 金箍：只留最下面一道，避开中心的交汇处 -->
+    <rect x="119.5" y="172" width="17" height="6" rx="3" fill="url(#gold)" />
+
+    <!-- 杖顶托座 -->
+    <path d="M112 94 L144 94 L139 104 L117 104 Z" fill="url(#gold)" />
+    <path d="M119 92 Q128 100 137 92" fill="none" stroke="url(#gold)" stroke-width="4" stroke-linecap="round" />
+
+    <!-- 水魔石 -->
+    <circle cx="128" cy="74" r="23" fill="#5fe0f0" fill-opacity="0.34" filter="url(#soft)" />
+    <circle cx="128" cy="74" r="20" fill="url(#aqua)" />
+    <circle cx="128" cy="74" r="20" fill="none" stroke="#eafeff" stroke-opacity="0.55" stroke-width="1.4" />
+    <ellipse cx="120" cy="66" rx="6.4" ry="4.8" fill="#ffffff" fill-opacity="0.65" transform="rotate(-32 120 66)" />
+  </g>
+
+  <!-- 长剑：剑尖朝右上 -->
+  <g transform="rotate(45 128 128)">
+    <path d="M128 40 L149 98 L149 124 L107 124 L107 98 Z" fill="#000000" fill-opacity="0.45" filter="url(#tiny)" transform="translate(2 5)" />
+
+    <!-- 剑身 -->
+    <path d="M128 38 L149 96 L149 122 L107 122 L107 96 Z" fill="url(#steel)" />
+    <path d="M128 46 L128 120" stroke="#ffffff" stroke-opacity="0.5" stroke-width="2.4" stroke-linecap="round" />
+    <path d="M118 60 L118 118" stroke="#ffffff" stroke-opacity="0.3" stroke-width="3.4" stroke-linecap="round" />
+    <path d="M138 68 L138 118" stroke="#5a6680" stroke-opacity="0.45" stroke-width="3" stroke-linecap="round" />
+
+    <!-- 护手 -->
+    <rect x="96" y="120" width="64" height="11" rx="5.5" fill="url(#gold)" />
+    <rect x="98" y="121.2" width="60" height="3.8" rx="1.9" fill="#fff6dd" fill-opacity="0.55" />
+
+    <!-- 握柄与柄头 -->
+    <rect x="120" y="131" width="16" height="40" rx="8" fill="#232a42" />
+    <g stroke="#c9a97a" stroke-opacity="0.55" stroke-width="2">
+      <path d="M122 142 L134 146" />
+      <path d="M122 154 L134 158" />
+      <path d="M122 166 L134 170" />
+    </g>
+    <circle cx="128" cy="181" r="10" fill="url(#gold)" />
+    <circle cx="128" cy="181" r="10" fill="none" stroke="#fff6dd" stroke-opacity="0.45" stroke-width="1.2" />
+    <ellipse cx="124.8" cy="177.8" rx="3.3" ry="2.4" fill="#fff6dd" fill-opacity="0.6" transform="rotate(-32 124.8 177.8)" />
+  </g>
+</svg>
