@@ -161,7 +161,7 @@ fs.writeFileSync(
   "utf8",
 );
 
-const outZip = path.join(releaseDir, `${APP_NAME}-${pkg.version}-${TARGET}.zip`);
+const outZip = path.join(releaseDir, `${pkg.name}-${pkg.version}-${TARGET}.zip`);
 fs.rmSync(outZip, { force: true });
 console.log("· 打包 zip");
 const archive = new AdmZip();

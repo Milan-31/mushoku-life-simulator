@@ -13,8 +13,10 @@ React 19 + TypeScript + Vite 构建，Electron 打包为 Windows 免安装版。
 
 ## 下载
 
-到 [Releases](../../releases) 页下载最新的 `无职转生人生模拟器-<版本>-win32-x64.zip`，
+到 [Releases](../../releases) 页下载最新的 `mushoku-life-simulator-<版本>-win32-x64.zip`，
 解压后双击 `无职转生人生模拟器.exe` 即可运行，无需安装。
+
+压缩包名用英文，是为了让下载链接在各处都能正常显示；解开之后的目录与主程序仍是中文名。
 
 ## 特性
 
@@ -88,7 +90,7 @@ npm run dist:win   # 打包 Windows 免安装版
 `npm run dist:win` 会先执行 `vite build`，然后下载官方 Electron 的 `win32-x64` 运行时，产出：
 
 - `release/无职转生人生模拟器-win32-x64/` —— 免安装目录
-- `release/无职转生人生模拟器-<版本>-win32-x64.zip` —— 分发的压缩包
+- `release/mushoku-life-simulator-<版本>-win32-x64.zip` —— 分发的压缩包（包名用英文，见上文）
 
 运行时下载缓存在 `.cache/`，重复打包不重新下载。打包脚本不依赖 Windows 或 wine，可在任意平台产出。
 桌面版通过自定义 `app://` 协议加载本地资源，因此 ES 模块、`localStorage` 与 `fetch` 都能正常工作。
