@@ -39,6 +39,7 @@ import {
   settleTalk,
 } from "./engine/world";
 import { hasAnySlot, resumeSlot, writeSlot } from "./engine/saves";
+import { verdictLine } from "./engine/death";
 import { installApi, readUrlImport } from "./engine/api";
 import {
   accountExhausted,
@@ -237,10 +238,13 @@ export default function App() {
       const res = await requestEpilogue(aiConfig, state);
       if (!res.data || res.data.length === 0) return state;
       const cause = state.ending.cause;
+      const verdict = verdictLine(state.ending.kind, state.ending.basis);
       return {
         ...state,
         ending: { ...state.ending, epilogue: res.data },
-        log: state.log.map((e) => (e.kind === "ending" ? { ...e, lines: [cause, ...res.data!] } : e)),
+        log: state.log.map((e) =>
+          e.kind === "ending" ? { ...e, lines: [cause, verdict, ...res.data!].filter(Boolean) } : e,
+        ),
       };
     },
     [aiConfig],

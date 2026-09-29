@@ -378,6 +378,13 @@ export interface Ending {
   month: number;
   age: number;
   cause: string;
+  /**
+   * 死因归类：寿终 / 病殁 / 横死 / 超自然。见 engine/death.ts 的判定规则。
+   * 留空只出现在旧存档里。
+   */
+  kind?: string;
+  /** 这次死亡凭什么站得住的依据，在终章里单独列出来 */
+  basis?: string;
   epilogue: string[];
 }
 

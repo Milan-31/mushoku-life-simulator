@@ -761,6 +761,17 @@ p { margin: 0; }
 .ending__kicker { font-size: 12px; letter-spacing: 0.42em; color: #8a6a2e; }
 .ending__title { font-size: 32px; color: #4a3a18; margin: 8px 0 6px; }
 .ending__cause { color: #5a4d35; font-size: 14px; line-height: 1.9; }
+/* 死亡判定：死因归类与判定依据。规则见 engine/death.ts */
+.ending__verdict {
+  margin: 16px 0 4px;
+  padding: 12px 15px;
+  border-left: 3px solid rgba(138, 106, 46, 0.55);
+  background: rgba(176, 138, 60, 0.1);
+  border-radius: 0 8px 8px 0;
+}
+.ending__verdict-head { font-size: 12.5px; color: #6a5632; letter-spacing: 0.08em; }
+.ending__verdict-head b { color: #7a3a3a; font-size: 14px; letter-spacing: 0; }
+.ending__verdict-basis { margin-top: 6px; font-size: 13px; line-height: 1.8; color: #4a4030; }
 .ending__stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 26px; margin: 22px 0; }
 .ending__stat { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px dashed rgba(90, 70, 40, 0.28); font-size: 13.5px; }
 .ending__stat span { color: #7a6a4a; }

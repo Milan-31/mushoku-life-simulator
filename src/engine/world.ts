@@ -51,6 +51,16 @@ import {
 import { combatPower, skillById } from "../data/skills";
 import { memoryOf, rememberEvent, rememberTalk, sanitizeMemory } from "./memory";
 import { withBirthYear } from "./age";
+import {
+  hasSupernaturalBasis,
+  judgeFatal,
+  judgeIllness,
+  judgeOldAge,
+  spareChild,
+  verdictLine,
+  type DeathBasis,
+  type DeathVerdict,
+} from "./death";
 import { canToggleCompanion, reachable, whereabouts } from "./presence";
 import {
   emptyFamily,
@@ -914,6 +924,14 @@ export function advanceMonth(prev: GameState, ai?: AiWorldTurn | null): GameStat
   }
   const character = { ...prev.character, age };
 
+  // 健康见底时先托一把：不到 12 岁不会因病而死，只留下病根。
+  // 这一步要排在拼 next 之前，否则改到的健康写不进这一回合的状态
+  const spared = spareChild(age, stats.find((s) => s.key === "health")?.value ?? 100);
+  if (spared.spared) {
+    stats = stats.map((s) => (s.key === "health" ? { ...s, value: spared.health } : s));
+    notices.push(`${character.name}病得只剩一口气。这一关他挺过来了，但身子从此落下病根。`);
+  }
+
   let log = [entry, ...prev.log].slice(0, 160);
 
   // 每 15 轮强制自检：AI 在场时由它自己撰写快照，否则用模板
@@ -967,18 +985,35 @@ export function advanceMonth(prev: GameState, ai?: AiWorldTurn | null): GameStat
     canon: mergeCanon(prev.canon, ai?.canon),
   };
 
-  // AI 判定这个月致命：死因由它写，死亡时的收尾仍由引擎执行
+  // 死亡判定。三条路径都先过 engine/death.ts 那套规则：
+  // AI 提出的死、寿数已尽、健康耗尽。门槛过不了就不判死。
+  const healthValue = stats.find((s) => s.key === "health")?.value ?? 100;
+  const healthDelta = healthValue - (prev.stats.find((s) => s.key === "health")?.value ?? 100);
+  const at: DeathBasis = {
+    age,
+    lifespan,
+    health: healthValue,
+    healthDelta,
+    inBattle: false,
+    supernatural: hasSupernaturalBasis(character),
+  };
+
   if (ai?.fatal?.trim()) {
-    return die(next, ai.fatal.trim());
+    const verdict = judgeFatal(ai.fatal.trim(), at);
+    if (verdict.ok) return die(next, ai.fatal.trim(), verdict);
+    // 驳回：不判死。数值照旧落账，这件事降级成重伤，理由留在纪事里
+    next.log = [
+      makeEntry(`dn-${turn}`, next, "world", "重伤 · 从鬼门关被拽了回来", [verdict.reason]),
+      ...next.log,
+    ].slice(0, 160);
+    next.notices = [...next.notices, `这个月险些就过去了。${verdict.reason}`];
   }
 
-  // 死亡判定
-  const health = stats.find((s) => s.key === "health")?.value ?? 100;
   if (age >= lifespan) {
-    return die(next, `寿数已尽。${formatYear(year)}，${character.name}在 ${age} 岁上停止了呼吸。`);
+    return die(next, `寿数已尽。${formatYear(year)}，${character.name}在 ${age} 岁上停止了呼吸。`, judgeOldAge(at));
   }
-  if (health <= 0) {
-    return die(next, `久病不愈。${formatYear(year)}，${character.name}在 ${age} 岁上离开了这个世界。`);
+  if (healthValue <= 0) {
+    return die(next, `久病不愈。${formatYear(year)}，${character.name}在 ${age} 岁上离开了这个世界。`, judgeIllness(at));
   }
 
   // 原作人物的遇合：条件一旦满足就进入关系网，每月最多出现一位，避免一次涌入
@@ -1675,9 +1710,37 @@ export function resolveAction(
     log: [entry, ...prev.log].slice(0, 160),
   }).state;
 
-  // AI 判定这次行动直接致命（跳崖、硬闯魔物巢穴等）
+  // AI 判定这次行动直接致命（跳崖、硬闯魔物巢穴等）。
+  // 走的是与月度推进同一套规则：过不了门槛就不判死，降级成重伤
   if (ai?.fatal?.trim()) {
-    return { state: die(next, ai.fatal.trim()), entry, matched };
+    const healthValue = next.stats.find((s) => s.key === "health")?.value ?? 100;
+    const at: DeathBasis = {
+      age: next.character.age,
+      lifespan: next.lifespan,
+      health: healthValue,
+      healthDelta: healthValue - (prev.stats.find((s) => s.key === "health")?.value ?? 100),
+      inBattle: command?.category === "战斗",
+      supernatural: hasSupernaturalBasis(next.character),
+    };
+    const verdict = judgeFatal(ai.fatal.trim(), at);
+    if (verdict.ok) return { state: die(next, ai.fatal.trim(), verdict), entry, matched };
+    entry.lines.push(verdict.reason);
+    return { state: { ...next, notices: [...next.notices, `这次险些就过去了。${verdict.reason}`] }, entry, matched };
+  }
+
+  // 健康见底同样先托一把，与月度推进一致
+  const spared = spareChild(next.character.age, next.stats.find((s) => s.key === "health")?.value ?? 100);
+  if (spared.spared) {
+    const stats = next.stats.map((s) => (s.key === "health" ? { ...s, value: spared.health } : s));
+    return {
+      state: {
+        ...next,
+        stats,
+        notices: [...next.notices, `${next.character.name}病得只剩一口气。这一次他挺过来了。`],
+      },
+      entry,
+      matched,
+    };
   }
 
   return { state: next, entry, matched };
@@ -1886,12 +1949,18 @@ export function changeDifficulty(prev: GameState, difficulty: Difficulty): GameS
 
 /* ---------- 死亡与结局 ---------- */
 
-function die(state: GameState, cause: string): GameState {
+/**
+ * 收尾：把死亡写进存档。
+ * verdict 是判定规则给出的结论，会一并写进终章，让人看得到这次凭什么死得成。
+ */
+function die(state: GameState, cause: string, verdict?: DeathVerdict): GameState {
   const ending: Ending = {
     year: state.year,
     month: state.month,
     age: state.character.age,
     cause,
+    kind: verdict?.kind,
+    basis: verdict?.basis,
     epilogue: composeEpilogue(state),
   };
   const entry: ChronicleEntry = {
@@ -1900,7 +1969,7 @@ function die(state: GameState, cause: string): GameState {
     month: state.month,
     kind: "ending",
     title: "终章 · 这一段人生走到了尽头",
-    lines: [cause, ...ending.epilogue],
+    lines: [cause, verdictLine(verdict?.kind, verdict?.basis), ...ending.epilogue].filter(Boolean),
   };
   const next: GameState = {
     ...state,

@@ -24,6 +24,15 @@ export default function EndingScreen({ state, onReplay, onAchievements, onRestar
         <h1 className="ending__title">{c.name}的一生</h1>
         <p className="ending__cause">{state.deathCause ?? "这一段人生走到了尽头。"}</p>
 
+        {ending?.kind && (
+          <div className="ending__verdict">
+            <div className="ending__verdict-head">
+              死亡判定 · <b>{ending.kind}</b>
+            </div>
+            <p className="ending__verdict-basis">{ending.basis}</p>
+          </div>
+        )}
+
         <div className="ending__stats">
           <div className="ending__stat"><span>享年</span><b>{c.age} 岁</b></div>
           <div className="ending__stat"><span>停止于</span><b>{formatDate(state.year, state.month)}</b></div>
