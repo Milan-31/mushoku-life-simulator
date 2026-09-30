@@ -1,4 +1,18 @@
-export type View = "title" | "creation" | "rudeus" | "game" | "rulebook" | "achievements" | "ending";
+export type View = "title" | "creation" | "rudeus" | "game" | "rulebook" | "achievements" | "ending" | "detail";
+
+/**
+ * 主页上每一块纲要都能进一个自己的详情页。
+ * 主页只放「一眼看得完」的纲要，完整信息都在这些页里。
+ */
+export type DetailKind =
+  | "profile"
+  | "stats"
+  | "skills"
+  | "relations"
+  | "mainline"
+  | "factions"
+  | "threads"
+  | "achievements";
 
 /** 难度：影响寿命、收入、健康衰减、事件频率、行动收益与抉择代价 */
 export type Difficulty = "安逸" | "标准" | "残酷" | "地狱";
@@ -39,7 +53,16 @@ export interface CreationDraft {
   painful: string;
   style: string;
   difficulty: Difficulty;
+  /**
+   * 主线引导。创建存档时随机抽一条主线，用「随机」；
+   * 抽完之后由接入的 AI 按主角信息做二次修改，之后每年按实际行为再微调。
+   * 「不介入」意味着这一局不要主线，只留自由行动与原作事件。
+   */
+  mainlineMode: MainlineMode;
 }
+
+/** 主线引导的开关。原作模式不走这里，它有自己的那一条 */
+export type MainlineMode = "随机" | "不介入";
 
 export interface Character {
   name: string;
@@ -81,7 +104,7 @@ export type OriginGroup =
   | "mirees"
   | "mystic";
 
-export type EntryKind = "world" | "action" | "rumor" | "choice" | "achievement" | "ending";
+export type EntryKind = "world" | "action" | "rumor" | "choice" | "achievement" | "ending" | "mainline";
 
 export interface ChronicleEntry {
   id: string;
@@ -291,11 +314,19 @@ export interface SceneStash {
   byScene: Record<string, CustomCommand[]>;
 }
 
+/**
+ * 写数据时用的指令写法。
+ *
+ * id 由 mergeSceneStash 按「场景 + 指令名」统一分配，所以写数据的人（人也好，模型也好）
+ * 不必自己编一个；存档里存下来的仍然是完整的 CustomCommand。
+ */
+export type CustomCommandDraft = Omit<CustomCommand, "id"> & { id?: string };
+
 /** 模型提交的一份场景改动：名字对上已有场景就追加指令，对不上就新建一个场景 */
 export interface ScenePatch {
   name: string;
   desc?: string;
-  commands: CustomCommand[];
+  commands: CustomCommandDraft[];
 }
 
 export interface Faction {
@@ -388,6 +419,102 @@ export interface Ending {
   epilogue: string[];
 }
 
+/* ---------- 主线剧情 ---------- */
+
+/**
+ * AI 按主角特点对某一章的二次改写。
+ * 只覆盖叙述与指引：章的门槛、任务的判定条件这些「机器读的东西」保持原样，
+ * 所以模型改不动这个世界怎么运转，只能改变这段剧情长什么样。
+ */
+export interface MainlineStageFit {
+  title?: string;
+  premise?: string;
+  objective?: string;
+  guidance?: string[];
+  /** 模型为本局追加的任务。判定条件由它自己给的 flag 承担 */
+  extraQuests?: { id: string; label: string; hint: string; flag: string }[];
+}
+
+/** 一条主线的存档状态。主线本身是静态数据（src/data/mainlines），这里只记走到哪儿了 */
+export interface MainlineState {
+  /** src/data/mainlines 里的主线 id */
+  id: string;
+  /** 当前章序号（0 起）。开篇失败时为 -1 */
+  stage: number;
+  /** 进入当前章的回合号，用来判「在这一章里过了多少个月」 */
+  stageTurn: number;
+  /** 已经走完的章 id */
+  cleared: string[];
+  /** 已完成的任务 id（带章前缀，全局唯一） */
+  doneQuests: string[];
+  /** 开场那一年 */
+  startYear: number;
+  /** 达成（走完全部章）或未竟（超期、中途断掉）。留空表示还在走 */
+  outcome?: "达成" | "未竟";
+  endedYear?: number;
+  /** 开篇那段纪事的 id，AI 改写开场时按它替换正文 */
+  openingId: string;
+  /** AI 按主角信息做的那一层改写 */
+  fit?: {
+    name?: string;
+    tagline?: string;
+    opening?: string[];
+    stages: Record<string, MainlineStageFit>;
+  };
+  /** 最近一次年度微调 */
+  tune?: { year: number; note: string; focus?: string };
+  /** 历次导演注记，长期保留。面板与终章都用它回看这条线是怎么走的 */
+  notes: string[];
+  /** 已经判过超期的章 id，避免反复算 */
+  overdue?: string[];
+}
+
+/** 主线面板读出来的一份快照，全部由 engine/mainline.ts 现算 */
+export interface MainlineQuestView {
+  id: string;
+  label: string;
+  hint: string;
+  done: boolean;
+  /** 还没做到的原因，直接显示在面板上 */
+  reason: string;
+}
+
+export interface MainlineChapterView {
+  id: string;
+  title: string;
+  /** 「拖过」：期限到了还没做完，世界自己往前走了。这一章的收成一概没有 */
+  status: "已完成" | "进行中" | "未到" | "拖过";
+  note: string;
+}
+
+export interface MainlineView {
+  id: string;
+  name: string;
+  theme: string;
+  tagline: string;
+  fit: string;
+  outcome?: "达成" | "未竟";
+  endedYear?: number;
+  stageIndex: number;
+  stageCount: number;
+  stage: {
+    id: string;
+    title: string;
+    premise: string;
+    objective: string;
+    guidance: string[];
+    quests: MainlineQuestView[];
+  } | null;
+  /** 下一章是什么、为什么还没开 */
+  next: { title: string; reason: string } | null;
+  chapters: MainlineChapterView[];
+  /** 本章还剩几个月就超期。null 表示不设期限 */
+  deadlineLeft: number | null;
+  notes: string[];
+  tune?: { year: number; note: string; focus?: string };
+  progress: number;
+}
+
 export interface GameState {
   character: Character;
   turn: number;
@@ -445,6 +572,11 @@ export interface GameState {
    * 只随存档保存，不写进游戏本体的任何内容文件。
    */
   canon: string[];
+  /**
+   * 这一局抽到的主线（见 src/data/mainlines）。
+   * 为 undefined 表示这一局没有主线：旧存档、以及创建时选了「不介入」的人生都是这样。
+   */
+  mainline?: MainlineState;
 }
 
 export type AchievementCategory = "出身" | "成长" | "情感" | "世界" | "生存" | "抉择";

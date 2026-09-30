@@ -39,7 +39,7 @@ import {
   type PresetOutcome,
 } from "../data/scenes";
 import { PLACES, placeById, type PlaceDef } from "../data/places";
-import { canonArrivals, canonById, homeOf, toRelation } from "../data/characters";
+import { canonArrivals, toRelation } from "../data/characters";
 import {
   ACQUAINTANCE_LIMIT,
   CONTACT_MIN_STARS,
@@ -49,7 +49,7 @@ import {
   openingLine,
 } from "../data/acquaintances";
 import { combatPower, skillById } from "../data/skills";
-import { memoryOf, rememberEvent, rememberTalk, sanitizeMemory } from "./memory";
+import { memoryOf, rememberTalk, sanitizeMemory } from "./memory";
 import { withBirthYear } from "./age";
 import {
   hasSupernaturalBasis,
@@ -71,6 +71,24 @@ import {
   tryPlayerBirth,
 } from "./family";
 import { eventById, pickEvent, toPending } from "./events";
+import { advanceMainline, drawMainline, enterMainline, mainlineOutcomeLine, sanitizeMainline } from "./mainline";
+import { mainlineById } from "../data/mainlines";
+import {
+  applyEffects,
+  bumpStat,
+  clamp,
+  inferBond,
+  EVENT_LIMITS,
+  LIMITS,
+  RANK_ORDER,
+  TIER_ORDER,
+  type EffectContext,
+} from "./effects";
+
+// 数值落账的唯一控制点已经搬到 engine/effects.ts。
+// 这里原样再导出一次，原有的调用方（engine/ai.ts 等）不用改 import 路径。
+export { EVENT_LIMITS, LIMITS };
+export type { EffectLimits } from "./effects";
 
 /* ---------- 工具 ---------- */
 
@@ -134,10 +152,11 @@ export function formatDate(year: number, month: number): string {
 /** 一条年鉴里最多留几件事。超了就优先留下抉择与成就 */
 const YEAR_EVENT_LIMIT = 14;
 
-/** 事件的重要性排序，越小越该留下 */
+/** 事件的重要性排序，越小越该留下。主线节点与抉择同级：那是一条线的转折点 */
 const KIND_RANK: Record<EntryKind, number> = {
   ending: 0,
   choice: 1,
+  mainline: 1,
   achievement: 2,
   action: 3,
   rumor: 4,
@@ -299,20 +318,6 @@ const RUMORS: string[] = [
 
 /* ---------- 初始关系 ---------- */
 
-/**
- * 关系性质由角色身份推定，用于关系网分组与 NPC 对话时的扮演依据。
- * 显式写了 bond 的以显式为准。
- */
-export function inferBond(name: string, role: string): RelationBond {
-  const text = `${name}${role}`;
-  if (/母亲|父亲|妹|姐|兄|弟|养父|养母|族长|家主|家人|血亲/.test(text)) return "血亲";
-  if (/师父|师范|师兄|师姐|弟子|同门|道场|剑圣/.test(text)) return "师门";
-  if (/恋人|未婚|妻|夫|爱慕|情人/.test(text)) return "恋情";
-  if (/宿敌|仇|政敌|敌手/.test(text)) return "宿敌";
-  if (/同窗|同学|同僚|战友|同袍|同行|同伴|旅伴/.test(text)) return "同僚";
-  if (/友|玩伴|挚交|知己/.test(text)) return "挚友";
-  return "熟人";
-}
 
 function buildRelations(c: Character): Relation[] {
   const byGroup: Record<string, Relation[]> = {
@@ -427,187 +432,6 @@ function mergeCanon(prev: string[], incoming: string[] | undefined): string[] {
   return merged.slice(-CANON_LIMIT);
 }
 
-/**
- * 效果数值的上下限。AI 结果校验（ai.ts）与本文件的落账共用这一份定义，避免两处数字漂移。
- */
-export interface EffectLimits {
-  /** 单项属性增减 */
-  stat: number;
-  /** 阶级进度成长 */
-  tier: number;
-  /** 关系好感变动（星级本身仍限制在 0-5） */
-  star: number;
-  /** 人生目标进度增减 */
-  goal: number;
-  /** 寿命增减（岁） */
-  lifespan: number;
-  /** 精力增减 */
-  energy: number;
-  /** 单次行动的精力消耗 */
-  actionCost: number;
-}
-
-/** 常规上限：一次普通行动、一个月的世界动态，都按这个幅度结算 */
-export const LIMITS: EffectLimits = {
-  stat: 15,
-  tier: 20,
-  star: 3,
-  goal: 8,
-  lifespan: 2,
-  energy: 40,
-  actionCost: 25,
-};
-
-/**
- * 抉择事件的上限：常规的三倍，留给真正罕见的特殊事件。
- * 继承遗产、被判重刑、失去至亲、被诅咒缠身、捡到圣物、身份暴露、与列强正面交手，才用得上这个额度。
- * actionCost 一并保留只是为了保持结构一致，事件结算不使用它。
- */
-export const EVENT_LIMITS: EffectLimits = {
-  stat: 45,
-  tier: 60,
-  star: 9,
-  goal: 24,
-  lifespan: 6,
-  energy: 120,
-  actionCost: LIMITS.actionCost,
-};
-
-/** ---------- 效果落账 ---------- */
-
-/** 可被效果改动的状态切片，供行动结算与抉择结算共用 */
-interface EffectContext {
-  stats: StatBar[];
-  relations: Relation[];
-  factions: Faction[];
-  character: Character;
-  tierProgress: { magic: number; sword: number; adventure: number };
-  goalProgress: number;
-  lifespan: number;
-  energy: number;
-  notices: string[];
-  /** 已学技能 id。学会新技能时在这里累加 */
-  skills: string[];
-  /** 剧情标记。事件写入后，后续事件、场景与指令的门槛才打得开 */
-  flags: string[];
-  /** 当前年份。新认识的人要靠它定下出生年，年龄才会随年份长 */
-  year: number;
-}
-
-/**
- * 把一组效果落到状态切片上。所有数值都在这里夹取，
- * 因此无论效果来自内置事件表还是 AI 推演，边界的控制点只有一个。
- * limits 缺省为常规上限；只有抉择事件会传入放宽的 EVENT_LIMITS。
- */
-function applyEffects(ctx: EffectContext, effects: EventEffects, limits: EffectLimits = LIMITS): void {
-  if (effects.stats) {
-    for (const [key, value] of Object.entries(effects.stats)) {
-      if (!STAT_KEYS.has(key)) continue;
-      const delta = clamp(Math.round(Number(value) || 0), -limits.stat, limits.stat);
-      if (delta !== 0) ctx.stats = bumpStat(ctx.stats, key, delta);
-    }
-  }
-  if (effects.tier) {
-    const gain = clamp(Math.round(effects.tier.gain) || 0, 0, limits.tier);
-    if (effects.tier.kind === "magic") {
-      const r = advanceTier(ctx.character.magicTier, gain, ctx.tierProgress.magic);
-      ctx.character = { ...ctx.character, magicTier: r.tier };
-      ctx.tierProgress.magic = r.progress;
-    } else if (effects.tier.kind === "sword") {
-      const r = advanceTier(ctx.character.swordTier, gain, ctx.tierProgress.sword);
-      ctx.character = { ...ctx.character, swordTier: r.tier };
-      ctx.tierProgress.sword = r.progress;
-    } else if (effects.tier.kind === "adventure") {
-      const r = advanceRank(ctx.character.adventurerRank, gain, ctx.tierProgress.adventure);
-      ctx.character = { ...ctx.character, adventurerRank: r.rank };
-      ctx.tierProgress.adventure = r.progress;
-    }
-  }
-  if (effects.starDelta) {
-    const { match, delta, note } = effects.starDelta;
-    let idx = -1;
-    if (match) idx = ctx.relations.findIndex((r) => r.name.includes(match));
-    if (idx < 0 && ctx.relations.length > 0) {
-      idx = 0;
-      for (let i = 1; i < ctx.relations.length; i += 1) {
-        if (ctx.relations[i].stars > ctx.relations[idx].stars) idx = i;
-      }
-    }
-    if (idx >= 0) {
-      const step = clamp(Math.round(delta) || 0, -limits.star, limits.star);
-      ctx.relations = ctx.relations.map((r, i) => {
-        if (i !== idx) return r;
-        // 好感变化的原因写进这个人的长期记忆，而不是覆盖掉「他是谁」那句话
-        const memory = note ? rememberEvent(memoryOf(r), note) : r.memory;
-        return { ...r, stars: clamp(r.stars + step, 0, 5), memory };
-      });
-    }
-  }
-  if (effects.addRelation && !ctx.relations.some((r) => r.name === effects.addRelation!.name)) {
-    const { role, stars, bond, canonId } = effects.addRelation;
-    // 是原作人物时，按考据里的驻地安家（龙王之笛唤来的五龙将就该在天空之城），
-    // 不是的话才落到玩家此刻所在的地方
-    const canon = canonId ? canonById(canonId) : undefined;
-    ctx.relations = [
-      ...ctx.relations,
-      // 新认识的人在这里就定下出生年与所在地，之后年龄随年份长、人留在原地
-      withBirthYear(
-        {
-          ...effects.addRelation,
-          role,
-          stars: clamp(Math.round(stars) || 1, 1, 5),
-          bond: bond ?? inferBond(effects.addRelation.name, role),
-          place:
-            effects.addRelation.place ?? (canon ? homeOf(canon, ctx.character.residence) : ctx.character.residence),
-        },
-        ctx.year,
-      ),
-    ];
-  }
-  if (effects.goal) {
-    ctx.goalProgress = clamp(ctx.goalProgress + clamp(Math.round(effects.goal) || 0, -limits.goal, limits.goal), 0, 100);
-  }
-  if (effects.lifespan) {
-    const years = clamp(Math.round(effects.lifespan) || 0, -limits.lifespan, limits.lifespan);
-    if (years !== 0) ctx.lifespan = Math.max(30, ctx.lifespan + years);
-  }
-  if (effects.energy) {
-    ctx.energy = clamp(ctx.energy + clamp(Math.round(effects.energy) || 0, -limits.energy, limits.energy), 0, 100);
-  }
-  if (effects.factions) {
-    for (const [key, value] of Object.entries(effects.factions)) {
-      if (!ctx.factions.some((f) => f.name === key)) continue;
-      const delta = clamp(Math.round(Number(value) || 0), -limits.stat, limits.stat);
-      if (delta === 0) continue;
-      ctx.factions = ctx.factions.map((f) =>
-        f.name === key ? { ...f, value: clamp(f.value + delta, -100, 100) } : f,
-      );
-    }
-  }
-  if (effects.notice) ctx.notices.push(effects.notice);
-  // 剧情标记：只累加，不去重也不清除——「发生过」这件事本身不该被抹掉
-  if (effects.flag) {
-    const flag = effects.flag.trim();
-    if (flag && !ctx.flags.includes(flag)) ctx.flags = [...ctx.flags, flag];
-  }
-  // 所在地：转移事件与迁居都从这里改。改了地方，能做的事情也就跟着变
-  if (effects.residence && effects.residence.trim() && ctx.character.residence !== effects.residence.trim()) {
-    ctx.character = { ...ctx.character, residence: effects.residence.trim() };
-    ctx.notices.push(`你的所在地变成了「${effects.residence.trim()}」。`);
-  }
-  // 学会技能：把 id 记下来，并把该技能的一次性成长立刻落账
-  if (effects.learnSkill) {
-    const skill = skillById(effects.learnSkill);
-    if (skill && !ctx.skills.includes(skill.id)) {
-      ctx.skills = [...ctx.skills, skill.id];
-      ctx.notices.push(`学会了「${skill.name}」（${skill.school}·${skill.grade}）`);
-      applyEffects(ctx, skill.effects, limits);
-    }
-  }
-}
-
-/** 允许出现在效果里的属性键，其余一律忽略 */
-const STAT_KEYS = new Set(["mana", "sword", "int", "charm", "faith", "wealth", "fame", "scheme", "health"]);
 
 /**
  * 预设命令的收益随难度缩放。只放大正向收益：惩罚与代价保持原样，
@@ -716,6 +540,13 @@ export interface GameSeed {
   relations?: Relation[];
   /** 开局的纪事正文。缺省用通用那一段 */
   openingLines?: string[];
+  /**
+   * 指定这一局的主线 id（见 src/data/mainlines）。
+   * 原作模式用它钉死自己那一条；普通创建不传，由引擎随机抽一条。
+   */
+  mainlineId?: string;
+  /** 这一局不要主线。优先级低于 mainlineId */
+  noMainline?: boolean;
 }
 
 export function createGameState(d: CreationDraft, seed?: GameSeed): GameState {
@@ -789,45 +620,17 @@ export function createGameState(d: CreationDraft, seed?: GameSeed): GameState {
     base.relations = [...base.relations, ...met.map((c) => toRelation(c, base.year, base.character.residence))];
     base.notices = [...base.notices, `你的人生里已经有一些名字：${met.map((c) => c.name).join("、")}`];
   }
-  return evaluateAchievements(base).state;
-}
-
-/* ---------- 阶级推进 ---------- */
-
-const TIER_ORDER = ["未觉醒", "初级", "中级", "上级", "圣级", "王级", "帝级", "神级"];
-const RANK_ORDER = ["未注册", "F", "E", "D", "C", "B", "A", "S"];
-
-function advanceTier(cur: string, gain: number, progress: number): { tier: string; progress: number } {
-  let idx = Math.max(0, TIER_ORDER.indexOf(cur));
-  let p = progress + gain;
-  while (p >= 100 && idx < TIER_ORDER.length - 1) {
-    p -= 100;
-    idx += 1;
-  }
-  if (idx === TIER_ORDER.length - 1) p = Math.min(p, 99);
-  return { tier: TIER_ORDER[idx], progress: p };
-}
-
-function advanceRank(cur: string, gain: number, progress: number): { rank: string; progress: number } {
-  let idx = Math.max(0, RANK_ORDER.indexOf(cur));
-  let p = progress + gain;
-  while (p >= 100 && idx < RANK_ORDER.length - 1) {
-    p -= 100;
-    idx += 1;
-  }
-  if (idx === RANK_ORDER.length - 1) p = Math.min(p, 99);
-  return { rank: RANK_ORDER[idx], progress: p };
+  // 主线：抽一条，把开场与第一章摊开。抽出来的是数据，改不改得动看引擎的门槛
+  const drawn = seed?.mainlineId
+    ? mainlineById(seed.mainlineId)
+    : seed?.noMainline || d.mainlineMode === "不介入"
+      ? undefined
+      : drawMainline(character);
+  return evaluateAchievements(drawn ? enterMainline(base, drawn) : base).state;
 }
 
 /* ---------- 通用变更助手 ---------- */
 
-function clamp(v: number, lo: number, hi: number): number {
-  return Math.max(lo, Math.min(hi, v));
-}
-
-function bumpStat(stats: StatBar[], key: string, delta: number): StatBar[] {
-  return stats.map((s) => (s.key === key ? { ...s, value: clamp(s.value + delta, 0, s.max) } : s));
-}
 
 function bumpRelation(relations: Relation[], delta: number): Relation[] {
   if (relations.length === 0) return relations;
@@ -1113,7 +916,8 @@ export function advanceMonth(prev: GameState, ai?: AiWorldTurn | null): GameStat
     next.notices = [...next.notices, `${contact.name}主动来找你，正在等你回话。`];
   }
 
-  return evaluateAchievements(next).state;
+  // 主线：这个月做的事可能刚好做完了一条任务，也可能把一章推到了尽头
+  return evaluateAchievements(advanceMainline(next)).state;
 }
 
 /** 主动沟通之间至少隔这么多回合，免得同一个人月月来敲门 */
@@ -1221,23 +1025,25 @@ export function interactWithRelation(
     ctx.relations = ctx.relations.map((r) => (r.name === name ? markSpouse(r) : r));
     ctx.notices.push(`你和${name}成了一个家的人。`);
   }
-  const state = evaluateAchievements({
-    ...prev,
-    character: ctx.character,
-    stats: ctx.stats,
-    relations: ctx.relations,
-    factions: ctx.factions,
-    tierProgress: ctx.tierProgress,
-    goalProgress: ctx.goalProgress,
-    lifespan: ctx.lifespan,
-    energy: ctx.energy,
-    notices: ctx.notices,
-    skills: ctx.skills,
-    flags: ctx.flags,
-    threads: applyThreads(prev.threads, effects),
-    actionsUsed: prev.actionsUsed + 1,
-    log: [entry, ...prev.log].slice(0, 160),
-  }).state;
+  const state = evaluateAchievements(
+    advanceMainline({
+      ...prev,
+      character: ctx.character,
+      stats: ctx.stats,
+      relations: ctx.relations,
+      factions: ctx.factions,
+      tierProgress: ctx.tierProgress,
+      goalProgress: ctx.goalProgress,
+      lifespan: ctx.lifespan,
+      energy: ctx.energy,
+      notices: ctx.notices,
+      skills: ctx.skills,
+      flags: ctx.flags,
+      threads: applyThreads(prev.threads, effects),
+      actionsUsed: prev.actionsUsed + 1,
+      log: [entry, ...prev.log].slice(0, 160),
+    }),
+  ).state;
   return { state, ok: true };
 }
 
@@ -1357,23 +1163,25 @@ export function relocate(prev: GameState, placeId: string): { state: GameState; 
   // 路途劳顿与新的所在地都挂在同一组效果上，边界仍然只有 applyEffects 一个控制点
   applyEffects(ctx, { energy: -10, residence: place.residence });
 
-  const state = evaluateAchievements({
-    ...prev,
-    character: ctx.character,
-    stats: ctx.stats,
-    relations: ctx.relations,
-    factions: ctx.factions,
-    tierProgress: ctx.tierProgress,
-    goalProgress: ctx.goalProgress,
-    lifespan: ctx.lifespan,
-    energy: ctx.energy,
-    notices: ctx.notices,
-    skills: ctx.skills,
-    flags: ctx.flags,
-    // 这一整个月都花在路上了
-    actionsUsed: cfg.actionsPerMonth,
-    log: [entry, ...prev.log].slice(0, 160),
-  }).state;
+  const state = evaluateAchievements(
+    advanceMainline({
+      ...prev,
+      character: ctx.character,
+      stats: ctx.stats,
+      relations: ctx.relations,
+      factions: ctx.factions,
+      tierProgress: ctx.tierProgress,
+      goalProgress: ctx.goalProgress,
+      lifespan: ctx.lifespan,
+      energy: ctx.energy,
+      notices: ctx.notices,
+      skills: ctx.skills,
+      flags: ctx.flags,
+      // 这一整个月都花在路上了
+      actionsUsed: cfg.actionsPerMonth,
+      log: [entry, ...prev.log].slice(0, 160),
+    }),
+  ).state;
   return { state, ok: true };
 }
 
@@ -1688,27 +1496,29 @@ export function resolveAction(
     if (def) pendingEvent = toPending(def);
   }
 
-  const next = evaluateAchievements({
-    ...prev,
-    character: ctx.character,
-    tierProgress: ctx.tierProgress,
-    stats: ctx.stats,
-    relations: ctx.relations,
-    factions: ctx.factions,
-    goalProgress: ctx.goalProgress,
-    lifespan: ctx.lifespan,
-    energy: ctx.energy,
-    notices: ctx.notices,
-    skills: ctx.skills,
-    flags: ctx.flags,
-    threads: applyThreads(prev.threads, ai),
-    actionsUsed: prev.actionsUsed + 1,
-    customScenes: mergeSceneStash(prev.customScenes, ai?.scenes),
-    canon: mergeCanon(prev.canon, ai?.canon),
-    aiEngagedTurn: engagedAi ? prev.turn : prev.aiEngagedTurn,
-    pendingEvent,
-    log: [entry, ...prev.log].slice(0, 160),
-  }).state;
+  const next = evaluateAchievements(
+    advanceMainline({
+      ...prev,
+      character: ctx.character,
+      tierProgress: ctx.tierProgress,
+      stats: ctx.stats,
+      relations: ctx.relations,
+      factions: ctx.factions,
+      goalProgress: ctx.goalProgress,
+      lifespan: ctx.lifespan,
+      energy: ctx.energy,
+      notices: ctx.notices,
+      skills: ctx.skills,
+      flags: ctx.flags,
+      threads: applyThreads(prev.threads, ai),
+      actionsUsed: prev.actionsUsed + 1,
+      customScenes: mergeSceneStash(prev.customScenes, ai?.scenes),
+      canon: mergeCanon(prev.canon, ai?.canon),
+      aiEngagedTurn: engagedAi ? prev.turn : prev.aiEngagedTurn,
+      pendingEvent,
+      log: [entry, ...prev.log].slice(0, 160),
+    }),
+  ).state;
 
   // AI 判定这次行动直接致命（跳崖、硬闯魔物巢穴等）。
   // 走的是与月度推进同一套规则：过不了门槛就不判死，降级成重伤
@@ -1825,7 +1635,7 @@ export function resolveEvent(prev: GameState, optionId: string): { state: GameSt
     return { state: next, entry };
   }
 
-  return { state: evaluateAchievements(next).state, entry };
+  return { state: evaluateAchievements(advanceMainline(next)).state, entry };
 }
 
 /* ---------- AI 剧情月 ---------- */
@@ -1898,24 +1708,26 @@ export function settleTalk(prev: GameState, settle: TalkSettlement): { state: Ga
     year: prev.year,
   };
   applyEffects(ctx, settle.effects);
-  const state = evaluateAchievements({
-    ...prev,
-    character: ctx.character,
-    stats: ctx.stats,
-    relations: ctx.relations,
-    factions: ctx.factions,
-    tierProgress: ctx.tierProgress,
-    goalProgress: ctx.goalProgress,
-    lifespan: ctx.lifespan,
-    energy: ctx.energy,
-    notices: ctx.notices,
-    skills: ctx.skills,
-    flags: ctx.flags,
-    threads: applyThreads(prev.threads, settle.effects),
-    actionsUsed: prev.actionsUsed + 1,
-    aiEngagedTurn: prev.turn,
-    log: [entry, ...prev.log].slice(0, 160),
-  }).state;
+  const state = evaluateAchievements(
+    advanceMainline({
+      ...prev,
+      character: ctx.character,
+      stats: ctx.stats,
+      relations: ctx.relations,
+      factions: ctx.factions,
+      tierProgress: ctx.tierProgress,
+      goalProgress: ctx.goalProgress,
+      lifespan: ctx.lifespan,
+      energy: ctx.energy,
+      notices: ctx.notices,
+      skills: ctx.skills,
+      flags: ctx.flags,
+      threads: applyThreads(prev.threads, settle.effects),
+      actionsUsed: prev.actionsUsed + 1,
+      aiEngagedTurn: prev.turn,
+      log: [entry, ...prev.log].slice(0, 160),
+    }),
+  ).state;
   return { state, entry };
 }
 
@@ -2019,6 +1831,10 @@ function composeEpilogue(s: GameState): string[] {
       ? `你最初想做的事——「${c.goal}」——做到了。`
       : `你最初想做的事是「${c.goal}」。这件事只完成了一半多一点（${Math.round(s.goalProgress)}%）。`,
   );
+
+  // 这一局抽到的那条主线，最后走到哪儿了。它才是这一段人生真正的骨架
+  const ml = mainlineOutcomeLine(s);
+  if (ml) out.push(ml);
 
   out.push(`这一段人生里，你解锁了 ${s.achievements.length} 项成就。`);
   out.push("六面世界还在继续。人神的棋局没有停，龙神的轮回还在往前走。");
@@ -2210,6 +2026,8 @@ export function normalizeState(raw: GameState): GameState {
     flags: Array.isArray(raw.flags) ? raw.flags.filter((f): f is string => typeof f === "string" && Boolean(f.trim())) : [],
     customScenes: sanitizeSceneStash(raw.customScenes),
     canon: Array.isArray(raw.canon) ? raw.canon.filter((c): c is string => typeof c === "string").slice(-CANON_LIMIT) : [],
+    // 主线：只留还认得出来的那一条。认不出来就整条丢掉，宁可这一局没有主线，也不要半条坏数据
+    mainline: sanitizeMainline(raw.mainline),
     pendingEvent: raw.pendingEvent ?? null,
     pendingTalk: raw.pendingTalk ?? null,
     deceased: Boolean(raw.deceased),
