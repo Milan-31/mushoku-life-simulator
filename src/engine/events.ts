@@ -5,6 +5,7 @@ import { RUDEUS_EVENTS } from "../data/rudeusEvents";
 import { CANON_CHARACTERS, canonKnown, type CanonCharacter } from "../data/characters";
 import { RUDEUS_NAME } from "../data/rudeus";
 import { skillById } from "../data/skills";
+import { MAINLINE_EVENTS } from "../data/mainlines";
 
 export type { EventEffects };
 
@@ -28,6 +29,12 @@ export interface DecisionEventDef {
    * 不是世界找上你，而是你自己走到那一步把这件事挑起来的。
    */
   commandOnly?: boolean;
+  /**
+   * 属于某一条主线（见 src/data/mainlines）。
+   * 有它的条目只在玩家的主线正好是那一条时才可能被随机抽到——
+   * 这是「二十条主线彼此不串味」的保证：宫廷线的事件不会掉进一个魔族孩子的人生里。
+   */
+  mainlineId?: string;
   options: EventOptionDef[];
 }
 
@@ -705,11 +712,20 @@ export const DECISION_EVENTS: DecisionEventDef[] = [
   ...CANON_HOOK_EVENTS,
   /* 只能由「你的行动」里的指令翻开的特殊事件 */
   ...COMMAND_EVENTS,
+  /* 20 条主线各自的抉择。每条只在自己的那条主线上出现 */
+  ...MAINLINE_EVENTS,
 ];
+
+/** 这条事件属不属于玩家现在这条主线。没写 mainlineId 的对谁都开放 */
+function inMainline(e: DecisionEventDef, s: GameState): boolean {
+  return !e.mainlineId || s.mainline?.id === e.mainlineId;
+}
 
 /** 挑选一个当前可触发、且未经历过的抉择事件。只能由指令翻开的不在池子里 */
 export function pickEvent(s: GameState, rng: () => number): DecisionEventDef | null {
-  const pool = DECISION_EVENTS.filter((e) => !e.commandOnly && !s.seenEvents.includes(e.id) && e.when(s));
+  const pool = DECISION_EVENTS.filter(
+    (e) => !e.commandOnly && !s.seenEvents.includes(e.id) && e.when(s) && inMainline(e, s),
+  );
   if (pool.length === 0) return null;
 
   const weighted = pool.flatMap((e) => {

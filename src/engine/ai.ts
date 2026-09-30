@@ -4,11 +4,13 @@ import { CATEGORY_ORDER } from "../data/scenes";
 import { PLACES } from "../data/places";
 import { canonRosterBrief, tieText } from "../data/characters";
 import { RUDEUS_NAME } from "../data/rudeus";
+import { mainlineById, type MainlineDef } from "../data/mainlines";
 import { MEMORY_FACT_CHAR_LIMIT, MEMORY_SUMMARY_LIMIT, elapsedText } from "./memory";
 import { childAge, childStage, childrenOf, spouseOf } from "./family";
 import type { AiActionOutcome, AiWorldTurn, EffectLimits } from "./world";
 import { EVENT_LIMITS, LIMITS, formatDate } from "./world";
 import { ABSOLUTE_MIN_AGE, ILLNESS_MIN_AGE } from "./death";
+import { mainlineBrief, type MainlineFitPayload, type MainlineTunePayload } from "./mainline";
 
 /**
  * AI 实时推演接入层。
@@ -828,6 +830,10 @@ function takeEffects(raw: Record<string, unknown>, max: EffectLimits): EventEffe
   // 只接受技能表里真实存在的 id，模型编出来的招式名不会落进存档
   const learnSkill = takeText(raw.learnSkill, 40);
   if (learnSkill && skillById(learnSkill)) effects.learnSkill = learnSkill;
+  // 剧情标记：写下一件「确实发生过」的事。主线的任务靠它判定，
+  // 所以模型只允许写提示词里明确告诉过它的那一面旗
+  const flag = takeText(raw.flag, 48);
+  if (flag) effects.flag = flag;
   return Object.keys(effects).length > 0 ? effects : undefined;
 }
 
@@ -1046,9 +1052,11 @@ export function requestWorldTurn(config: AiConfig, state: GameState): Promise<Ai
     "【最近经历】",
     recentBrief(state),
     "",
-    "【本轮线索】",
+    `【本轮线索】`,
     `人神：${state.threads.humanGod}`,
     `龙神：${state.threads.dragonGod}`,
+    "",
+    mainlineBrief(state),
     "",
     `【节奏参考】第 ${state.turn} 回合，上次抉择事件发生于第 ${state.lastEventTurn < 0 ? "尚未发生" : `${state.lastEventTurn} 回合`}。`,
     "",
@@ -1081,6 +1089,8 @@ export function requestActionOutcome(config: AiConfig, state: GameState, action:
     `【本月边界】已用行动 ${state.actionsUsed} 次，剩余精力 ${Math.round(state.energy)}。行动次数由引擎控制，你只需判断这次行动本身要花多少精力。`,
     "",
     ...canonBrief(state, config.inventPlot),
+    "",
+    mainlineBrief(state),
     "",
     "【任务】依据角色的能力、出身、时代与处境的真实逻辑，判定这次行动产生了什么后果，并据实结算。",
     "「lines」写 2-4 句，按上面【文风】那几条写：不要写成「你获得了一些经验」这种游戏播报，要写成确实发生过的事——谁在场、你做了什么、结果落在哪里。",
@@ -1292,6 +1302,8 @@ export function talkContext(state: GameState, relationName: string): string {
     "【这一段人生到目前为止的剧情】",
     plotBrief(state),
     "",
+    mainlineBrief(state),
+    "",
     "【你扮演的这个角色是谁】",
     relationBrief(state, relationName),
     "",
@@ -1408,6 +1420,242 @@ export function requestTalkSettlement(
     ],
     validateTalkSettlement,
   );
+}
+
+/* ---------- 主线的二次修改与年度微调 ---------- */
+
+/**
+ * 主线的两次 AI 介入。
+ *
+ * 第一次在开局：抽到的那条线是按一个通用的人写的，交给模型按主角的出身、时代、
+ * 天赋、性格与目标重写一遍叙述与指引，让它读起来是「这个人的故事」。
+ * 第二次在每年年末：模型看这一年实际发生了什么，再决定这条线往哪偏——
+ * 可以改文本、加任务、翻开一个只属于这一章的抉择，也可以判定这一章已经达成。
+ *
+ * 两次都只动文本与它自己追加的任务；章节门槛、任务判定条件这些机器读的东西
+ * 一律不由模型改动（见 engine/mainline.ts 的 applyMainlineFit）。
+ */
+
+/** 这一局抽到的主线在数据里的原文，交给模型时整条给它看 */
+function mainlineDefinition(def: MainlineDef): string {
+  return [
+    `【这一局抽到的主线】${def.name}（${def.theme}）`,
+    `一句话钩子：${def.tagline}`,
+    `本来为谁而写：${def.fit}`,
+    `原开场：${def.prologue.join(" ")}`,
+    "各章原文：",
+    ...def.stages.map((st, i) =>
+      [
+        `第 ${i + 1} 章（id: ${st.id}）${st.title}`,
+        `  处境：${st.premise}`,
+        `  目标：${st.objective}`,
+        `  指引：${st.guidance.map((g) => `\n    - ${g}`).join("")}`,
+        `  任务：${st.quests.map((q) => `${q.label}（${q.hint}）`).join("；")}`,
+      ].join("\n"),
+    ),
+  ].join("\n");
+}
+
+/** 这一年实际发生了什么。年度微调的依据 */
+function yearBrief(s: GameState): string {
+  const out: string[] = [];
+  const prev = s.yearbooks.find((y) => y.year === s.year - 1);
+  if (prev) {
+    out.push(`【${prev.year} 年（刚封存的年鉴）】`);
+    for (const e of prev.events.slice(0, 10)) out.push(`- ${e.month} 月 · ${e.title}：${e.text}`);
+    out.push(...prev.world.slice(0, 4).map((w) => `- 世界：${w}`));
+  }
+  const thisYear = s.log
+    .filter((e) => e.year === s.year && e.kind !== "world")
+    .slice(0, 14)
+    .reverse();
+  if (thisYear.length > 0) {
+    out.push(`【${s.year} 年，他到目前做过的事】`);
+    for (const e of thisYear) out.push(`- ${e.month} 月 · ${e.title}：${(e.lines[0] ?? "").slice(0, 70)}`);
+  }
+  out.push(
+    `【现在的他】${s.character.age} 岁　所在地：${s.character.residence}　魔术 ${s.character.magicTier}／剑术 ${s.character.swordTier}／冒险者 ${s.character.adventurerRank}　成就 ${s.achievements.length} 项`,
+  );
+  return out.join("\n");
+}
+
+const MAINLINE_FIT_TASK = [
+  "【任务】这条主线是按一个通用的人写的。现在把整条线改成属于这个主角的版本。",
+  "1. 你改的是叙述与指引：主线名、一句话钩子、开场纪事，以及各章的章名、处境、目标、指引。",
+  "2. 章的 id、顺序、数量都不许动。门槛、判定条件、数值一概不由你决定——你在写戏，不在改规则。",
+  "3. 主角的出身、时代、所在地、天赋、性格、人生目标、最珍贵与最痛苦的记忆，都要在文字里留下痕迹。",
+  "   一个米里斯教徒抽到剑之圣地的线，和一个兽族孩子抽到同一条线，读起来必须不一样。",
+  "4. 指引要落在他现在真的做得到的动作上：他在哪儿、有什么本事、身边有谁。做不到的事不要写进指引。",
+  "5. 每章可以追加 1-2 条任务，写清「怎么算做到」。这些任务由推演判定，做没做到由你后面的回合来认。",
+  "6. 开场写 3-5 行，把这条线在这个人身上怎么开场立起来；不要复述他的设定表，要写出具体的这一幕。",
+  "7. 只给要改的章，不改的章可以整段省略。所有文本按上面【文风】那几条写。",
+  "【输出格式】严格输出这个 JSON：",
+  "{",
+  '  "name": "按主角改写后的主线名",',
+  '  "tagline": "一句话钩子",',
+  '  "opening": ["开场第一段", "开场第二段"],',
+  '  "stages": [',
+  '    { "id": "原样照抄的章 id", "title": "章名", "premise": "处境", "objective": "目标", "guidance": ["指引一", "指引二"], "quests": [{ "label": "追加的任务", "hint": "怎么算做到" }] }',
+  "  ],",
+  '  "canon": ["需要长期记住的新设定，可省略"],',
+  '  "notice": "可选：写入系统记录的一句提示"',
+  "}",
+].join("\n");
+
+const MAINLINE_TUNE_TASK = [
+  "【任务】又过了一年。看这一年他实际做了什么，再决定这条线怎么往下导。",
+  "1. note：一句话导演注记，会写进纪事、玩家会看到。写这条线在他身上长成了什么样，或者接下来该往哪拐。",
+  "2. focus：这一年的重心，六个字以内。",
+  "3. stage：需要的话改写当前这一章的处境/目标/指引，可以只给其中一项。不改就整段省略。",
+  "4. advance：如果你认为这一章的目标其实已经达成（他做的事已经超过任务清单的要求），给 true，引擎会推进到下一章。",
+  "   保守使用：一年最多推一章，而且要有这一年真的发生过的事作为依据。",
+  '5. ending：只有在他已经把这条线走完、或者这条线的前提已经彻底没了的时候，才给 "达成" 或 "未竟"。否则省略。',
+  "6. event：这一年的处境如果把他推到了岔路口，给一个抉择事件（2-3 个选项，每个选项都要写结算与后果）；否则给 null。",
+  "7. flags：如果这一年他确实完成了上面任务表里某一项，把对应的 flag 写上。不要写别的 flag，也不要凭空给人情。",
+  "8. 克制：一年只调一次。他没变的地方就不要改，也不要把它写成重新开一条线。",
+  "【输出格式】严格输出这个 JSON：",
+  "{",
+  '  "note": "导演注记",',
+  '  "focus": "这一年的重心",',
+  '  "advance": false,',
+  '  "event": null,',
+  '  "flags": []',
+  "}",
+  "需要时再加上 stage、ending、canon、scenes、threads、notice。",
+  "event 若给出，用这个结构（2-3 个选项）：",
+  EVENT_SCHEMA,
+  "事件选项可用的效果字段（事件额度是常规的三倍，留给罕见时刻）：",
+  effectsDoc(EVENT_LIMITS, true),
+].join("\n");
+
+/** 只收下真的属于这条主线的章 */
+function takeMainlineStages(value: unknown, def: MainlineDef): MainlineFitPayload["stages"] {
+  if (!Array.isArray(value)) return undefined;
+  const out: NonNullable<MainlineFitPayload["stages"]> = [];
+  for (const raw of value.slice(0, def.stages.length)) {
+    if (!raw || typeof raw !== "object") continue;
+    const o = raw as Record<string, unknown>;
+    const id = takeText(o.id, 24);
+    if (!id || !def.stages.some((x) => x.id === id)) continue;
+    const quests: { label: string; hint?: string }[] = [];
+    if (Array.isArray(o.quests)) {
+      for (const q of o.quests.slice(0, 3)) {
+        if (!q || typeof q !== "object") continue;
+        const qo = q as Record<string, unknown>;
+        const label = takeText(qo.label, 24);
+        if (label) quests.push({ label, hint: takeText(qo.hint, 60) });
+      }
+    }
+    out.push({
+      id,
+      title: takeText(o.title, 20),
+      premise: takeText(o.premise, 90),
+      objective: takeText(o.objective, 60),
+      guidance: takeStrings(o.guidance, 6, 90),
+      quests: quests.length > 0 ? quests : undefined,
+    });
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+function validateMainlineFit(raw: Record<string, unknown>, def: MainlineDef): MainlineFitPayload | null {
+  const payload: MainlineFitPayload = {
+    name: takeText(raw.name, 20),
+    tagline: takeText(raw.tagline, 60),
+    opening: takeStrings(raw.opening, 5, 160),
+    stages: takeMainlineStages(raw.stages, def),
+    flags: takeStrings(raw.flags, 4, 48),
+    canon: takeCanon(raw),
+    scenes: takeScenes(raw.scenes),
+    threads: takeThreads(raw.threads),
+    notice: takeText(raw.notice, 80),
+  };
+  const empty =
+    !payload.name &&
+    !payload.tagline &&
+    !payload.opening?.length &&
+    !payload.stages?.length &&
+    !payload.flags?.length &&
+    !payload.canon?.length &&
+    !payload.scenes?.length &&
+    !payload.threads &&
+    !payload.notice;
+  return empty ? null : payload;
+}
+
+function validateMainlineTune(raw: Record<string, unknown>, def: MainlineDef): MainlineTunePayload | null {
+  const note = takeText(raw.note, 120);
+  if (!note) return null;
+  const stages = takeMainlineStages(raw.stage ? [raw.stage] : undefined, def);
+  return {
+    note,
+    focus: takeText(raw.focus, 40),
+    stage: stages?.[0],
+    advance: typeof raw.advance === "boolean" ? raw.advance : undefined,
+    ending: raw.ending === "达成" || raw.ending === "未竟" ? raw.ending : undefined,
+    event: takeEvent(raw.event),
+    flags: takeStrings(raw.flags, 4, 48),
+    canon: takeCanon(raw),
+    scenes: takeScenes(raw.scenes),
+    threads: takeThreads(raw.threads),
+    notice: takeText(raw.notice, 80),
+  };
+}
+
+/** 两次调用共用的背景：主角是谁、这条线是什么、现在走到哪儿 */
+function mainlineContext(state: GameState, def: MainlineDef): string {
+  return [
+    "【角色】",
+    characterBrief(state),
+    "",
+    "【当前属性】",
+    statsBrief(state),
+    "",
+    "【重要关系】",
+    relationsBrief(state),
+    "",
+    mainlineDefinition(def),
+    "",
+    ...canonBrief(state, true),
+  ].join("\n");
+}
+
+/** 开局之后的一次性介入：把这条线改成这个人的版本 */
+export function requestMainlineFit(config: AiConfig, state: GameState): Promise<AiCallResult<MainlineFitPayload>> {
+  const ms = state.mainline;
+  const def = ms ? mainlineById(ms.id) : undefined;
+  if (!def) return Promise.resolve({ data: null, error: null });
+  const user = [
+    mainlineContext(state, def),
+    "",
+    MAINLINE_FIT_TASK,
+    "",
+    "需要往这一份存档里加场景与指令时，按下面这一段写：",
+    SCENE_DOC,
+  ].join("\n");
+  return ask(config, user, (raw) => validateMainlineFit(raw, def));
+}
+
+/** 每年年末的一次微调：按这一年实际发生的事重新导一下这条线 */
+export function requestMainlineTune(config: AiConfig, state: GameState): Promise<AiCallResult<MainlineTunePayload>> {
+  const ms = state.mainline;
+  const def = ms ? mainlineById(ms.id) : undefined;
+  if (!def) return Promise.resolve({ data: null, error: null });
+  const user = [
+    mainlineContext(state, def),
+    "",
+    "【这条线现在的样子】",
+    mainlineBrief(state),
+    "",
+    "【这一年】",
+    yearBrief(state),
+    "",
+    MAINLINE_TUNE_TASK,
+    "",
+    "需要往这一份存档里加场景与指令时，按下面这一段写：",
+    SCENE_DOC,
+  ].join("\n");
+  return ask(config, user, (raw) => validateMainlineTune(raw, def));
 }
 
 /** 连通性自检：发一次最小请求，确认密钥、模型与返回格式都能用 */

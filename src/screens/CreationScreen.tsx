@@ -12,6 +12,7 @@ import {
   ERAS,
   FAITHS,
   MAGIC_TIERS,
+  MAINLINE_MODES,
   ORIGINS,
   POLITICAL_LEANS,
   RESIDENCES,
@@ -24,6 +25,7 @@ import {
   toggleTalent,
 } from "../data/creation";
 import { DIFFICULTY_OPTIONS } from "../data/difficulty";
+import { currentSnapshot, previewOption } from "../engine/preview";
 
 interface Props {
   draft: CreationDraft;
@@ -43,22 +45,55 @@ const STEPS = [
   "性格与目标",
   "模拟风格",
   "难度",
+  "主线引导",
   "确认启程",
 ];
+
+/** 预览：鼠标停在（或键盘焦点落在）某个取值上时，它对应的是哪个字段的哪个值 */
+interface Hover {
+  field: keyof CreationDraft;
+  value: string | string[];
+  desc?: string;
+}
+
+/** 一组选项共享的预览行为。传进 TileGrid 之后，每个格子都会自动上报悬停 */
+interface PreviewProps {
+  field?: keyof CreationDraft;
+  onPreview?: (h: Hover) => void;
+  onPreviewEnd?: () => void;
+}
 
 function Tile({
   option,
   index,
   selected,
   onSelect,
+  preview,
+  value,
 }: {
   option: Option;
   index: number;
   selected: boolean;
   onSelect: () => void;
+  preview?: PreviewProps;
+  /** 上报给预览的值。多选时传的是「选上之后的那份列表」 */
+  value?: string | string[];
 }) {
+  const report = () => {
+    if (!preview?.field || !preview.onPreview) return;
+    preview.onPreview({ field: preview.field, value: value ?? option.value, desc: option.desc });
+  };
   return (
-    <button type="button" className="tile" aria-pressed={selected} onClick={onSelect}>
+    <button
+      type="button"
+      className="tile"
+      aria-pressed={selected}
+      onClick={onSelect}
+      onMouseEnter={report}
+      onFocus={report}
+      onMouseLeave={preview?.onPreviewEnd}
+      onBlur={preview?.onPreviewEnd}
+    >
       <span className="tile__idx">{index + 1}</span>
       <span className="tile__label">{option.label}</span>
       {option.desc && <span className="tile__desc">{option.desc}</span>}
@@ -66,19 +101,24 @@ function Tile({
   );
 }
 
+/** 格子网格。列数交给 CSS 按可用宽度自动排，窄了自动减列，不会挤出去压到别的东西 */
+type GridSize = "wide" | "mid" | "tight";
+
 function TileGrid({
   options,
   value,
   onSelect,
-  columns = 2,
+  size = "mid",
+  preview,
 }: {
   options: Option[];
   value: string;
   onSelect: (v: string) => void;
-  columns?: 2 | 3 | 4;
+  size?: GridSize;
+  preview?: PreviewProps;
 }) {
   return (
-    <div className={`optgrid optgrid--${columns}`}>
+    <div className={`optgrid optgrid--${size}`}>
       {options.map((o, i) => (
         <Tile
           key={o.value}
@@ -86,6 +126,7 @@ function TileGrid({
           index={i}
           selected={value === o.value}
           onSelect={() => onSelect(o.value)}
+          preview={preview}
         />
       ))}
     </div>
@@ -96,15 +137,17 @@ function TileGridMulti({
   options,
   values,
   onToggle,
-  columns = 3,
+  size = "mid",
+  preview,
 }: {
   options: Option[];
   values: string[];
   onToggle: (v: string) => void;
-  columns?: 2 | 3 | 4;
+  size?: GridSize;
+  preview?: PreviewProps;
 }) {
   return (
-    <div className={`optgrid optgrid--${columns}`}>
+    <div className={`optgrid optgrid--${size}`}>
       {options.map((o, i) => (
         <Tile
           key={o.value}
@@ -112,33 +155,61 @@ function TileGridMulti({
           index={i}
           selected={values.includes(o.value)}
           onSelect={() => onToggle(o.value)}
+          preview={preview}
         />
       ))}
     </div>
   );
 }
 
-function Select({
+/** 一行放两个字段：两列各自都是 minmax(0,1fr)，里面的网格再挤也不会越界 */
+function Pair({ children }: { children: React.ReactNode }) {
+  return <div className="pairgrid">{children}</div>;
+}
+
+/** 一个字段：标签 + 网格（或输入框）。整个创建界面都用它，间距与对齐才有统一口径 */
+function Field({ label, children, note }: { label: string; children: React.ReactNode; note?: React.ReactNode }) {
+  return (
+    <div className="fieldset">
+      <div className="fieldset__label">{label}</div>
+      {children}
+      {note && <p className="fieldset__note">{note}</p>}
+    </div>
+  );
+}
+
+/** 文字输入：聚焦时也报一次预览，让「年龄」「名字」这类字段同样看得到后果 */
+function Input({
   label,
   value,
-  options,
+  placeholder,
+  field,
+  onPreview,
+  onPreviewEnd,
   onChange,
 }: {
   label: string;
   value: string;
-  options: Option[];
+  placeholder: string;
+  field: keyof CreationDraft;
+  onPreview?: (h: Hover) => void;
+  onPreviewEnd?: () => void;
   onChange: (v: string) => void;
 }) {
   return (
     <div>
       <label className="fieldlabel">{label}</label>
-      <select className="select" value={value} onChange={(e) => onChange(e.target.value)}>
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
+      <input
+        className="input"
+        value={value}
+        placeholder={placeholder}
+        onFocus={() => onPreview?.({ field, value })}
+        onBlur={onPreviewEnd}
+        onChange={(e) => {
+          onChange(e.target.value);
+          onPreview?.({ field, value: e.target.value });
+        }}
+      />
     </div>
   );
 }
@@ -146,8 +217,21 @@ function Select({
 export default function CreationScreen({ draft, onChange, onBegin, onExit }: Props) {
   const [step, setStep] = useState(0);
   const [hint, setHint] = useState<string | null>(null);
+  /** 鼠标停着的那个选项。它决定右侧预览面板显示什么 */
+  const [hover, setHover] = useState<Hover | null>(null);
 
   const eraLabel = useMemo(() => ERAS.find((e) => e.value === draft.era)?.label ?? draft.era, [draft.era]);
+  const preview = useMemo(
+    () => (hover ? previewOption(draft, hover.field, hover.value, hover.desc) : null),
+    [draft, hover],
+  );
+  const now = useMemo(() => currentSnapshot(draft), [draft]);
+
+  const previewOf = (field?: keyof CreationDraft): PreviewProps => ({
+    field,
+    onPreview: setHover,
+    onPreviewEnd: () => setHover(null),
+  });
 
   const canAdvance = () => {
     if (step === 3 && !draft.name.trim()) {
@@ -181,7 +265,9 @@ export default function CreationScreen({ draft, onChange, onBegin, onExit }: Pro
     <section className="creation">
       <div className="creation__top">
         <h1 className="creation__title">角色创建</h1>
-        <p className="creation__hint">系统不替你决定人生，只决定你从哪里开始。</p>
+        <p className="creation__hint">
+          系统不替你决定人生，只决定你从哪里开始。把鼠标停在任何一个选项上，右边会告诉你选了它会变成什么样。
+        </p>
       </div>
 
       <div className="creation__grid">
@@ -212,7 +298,9 @@ export default function CreationScreen({ draft, onChange, onBegin, onExit }: Pro
                   世界在你出生前已运转数万年。你所处的时代决定了历史会如何推进，以及你能听见哪些传闻。
                 </p>
               </div>
-              <TileGrid options={ERAS} value={draft.era} onSelect={(v) => onChange({ era: v })} columns={2} />
+              <Field label="时代">
+                <TileGrid options={ERAS} value={draft.era} onSelect={(v) => onChange({ era: v })} size="wide" preview={previewOf("era")} />
+              </Field>
             </>
           )}
 
@@ -224,7 +312,9 @@ export default function CreationScreen({ draft, onChange, onBegin, onExit }: Pro
                   出身主要影响家庭资源、法律身份、教育机会、社会偏见、人脉网络与初始魔力。它不等于命运。
                 </p>
               </div>
-              <TileGrid options={ORIGINS} value={draft.origin} onSelect={(v) => onChange({ origin: v })} columns={2} />
+              <Field label="出身">
+                <TileGrid options={ORIGINS} value={draft.origin} onSelect={(v) => onChange({ origin: v })} size="wide" preview={previewOf("origin")} />
+              </Field>
             </>
           )}
 
@@ -234,12 +324,15 @@ export default function CreationScreen({ draft, onChange, onBegin, onExit }: Pro
                 <h2 className="stagehead__title">选择出生身份</h2>
                 <p className="stagehead__desc">你睁开眼时，第一眼看到的是什么地方。</p>
               </div>
-              <TileGrid
-                options={BIRTH_IDENTITIES}
-                value={draft.birthIdentity}
-                onSelect={(v) => onChange({ birthIdentity: v })}
-                columns={3}
-              />
+              <Field label="出生身份">
+                <TileGrid
+                  options={BIRTH_IDENTITIES}
+                  value={draft.birthIdentity}
+                  onSelect={(v) => onChange({ birthIdentity: v })}
+                  size="mid"
+                  preview={previewOf("birthIdentity")}
+                />
+              </Field>
             </>
           )}
 
@@ -249,67 +342,84 @@ export default function CreationScreen({ draft, onChange, onBegin, onExit }: Pro
                 <h2 className="stagehead__title">基本信息</h2>
                 <p className="stagehead__desc">姓名、年龄、性别、所在地与家庭。除姓名外都可以留白，由系统生成。</p>
               </div>
-              <div className="fieldrow fieldrow--3">
-                <div>
-                  <label className="fieldlabel">姓名</label>
-                  <input
-                    className="input"
-                    value={draft.name}
-                    placeholder="例如：鲁迪乌斯"
-                    onChange={(e) => onChange({ name: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="fieldlabel">性别</label>
-                  <input
-                    className="input"
-                    value={draft.gender}
-                    placeholder="男 / 女 / 其他"
-                    onChange={(e) => onChange({ gender: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="fieldlabel">年龄</label>
+              <Pair>
+                <Input
+                  label="姓名"
+                  value={draft.name}
+                  placeholder="例如：鲁迪乌斯"
+                  field="name"
+                  onPreview={setHover}
+                  onPreviewEnd={() => setHover(null)}
+                  onChange={(v) => onChange({ name: v })}
+                />
+                <Input
+                  label="性别"
+                  value={draft.gender}
+                  placeholder="男 / 女 / 其他"
+                  field="gender"
+                  onPreview={setHover}
+                  onPreviewEnd={() => setHover(null)}
+                  onChange={(v) => onChange({ gender: v })}
+                />
+              </Pair>
+              <Field
+                label="年龄"
+                note="年龄决定出生年份，也决定开局时哪些事还没发生。"
+              >
+                <div className="agerow">
                   <input
                     className="input"
                     value={draft.age}
                     placeholder="7 岁 / 14 岁 / 成年"
-                    onChange={(e) => onChange({ age: e.target.value })}
+                    onFocus={() => setHover({ field: "age", value: draft.age })}
+                    onBlur={() => setHover(null)}
+                    onChange={(e) => {
+                      onChange({ age: e.target.value });
+                      setHover({ field: "age", value: e.target.value });
+                    }}
                   />
-                  <div className="chiprow" style={{ marginTop: 8 }}>
+                  <div className="chiprow">
                     {AGE_PRESETS.map((a) => (
                       <button
                         key={a}
                         type="button"
                         className="chip"
                         aria-pressed={draft.age === a}
+                        onMouseEnter={() => setHover({ field: "age", value: a })}
+                        onFocus={() => setHover({ field: "age", value: a })}
+                        onMouseLeave={() => setHover(null)}
+                        onBlur={() => setHover(null)}
                         onClick={() => onChange({ age: a })}
+                        title="点一下用这个年龄"
                       >
                         {a}
                       </button>
                     ))}
                   </div>
                 </div>
-              </div>
-              <div className="fieldrow">
-                <Select
-                  label="出生地 / 居住地"
-                  value={draft.residence}
+              </Field>
+              <Field label="出生地 / 居住地">
+                <TileGrid
                   options={RESIDENCES}
-                  onChange={(v) => onChange({ residence: v })}
+                  value={draft.residence}
+                  onSelect={(v) => onChange({ residence: v })}
+                  size="wide"
+                  preview={previewOf("residence")}
                 />
-                <Select label="信仰" value={draft.faith} options={FAITHS} onChange={(v) => onChange({ faith: v })} />
-              </div>
-              <div>
-                <label className="fieldlabel">家庭状况（可留白，由系统按出身生成）</label>
+              </Field>
+              <Field label="信仰">
+                <TileGrid options={FAITHS} value={draft.faith} onSelect={(v) => onChange({ faith: v })} size="mid" preview={previewOf("faith")} />
+              </Field>
+              <div className="fieldset">
+                <div className="fieldset__label">家庭状况</div>
                 <textarea
                   className="textarea"
                   value={draft.family}
-                  placeholder="例如：父亲是退役的剑士，母亲体弱。家里还有一个妹妹。"
+                  placeholder="可留白，由系统按出身生成。例如：父亲是退役的剑士，母亲体弱。家里还有一个妹妹。"
                   onChange={(e) => onChange({ family: e.target.value })}
                 />
               </div>
-              {hint && <p className="fieldset__note" style={{ color: "var(--crimson)" }}>{hint}</p>}
+              {hint && <p className="fieldset__note fieldset__note--warn">{hint}</p>}
             </>
           )}
 
@@ -321,65 +431,95 @@ export default function CreationScreen({ draft, onChange, onBegin, onExit }: Pro
                   阶级不是天赋的保证。王级以上为秘匿级别；圣级被称为天才；帝级以上为世界有数的实力者。
                 </p>
               </div>
-              <div className="fieldset">
-                <div className="fieldset__label">特殊天赋（最多 {TALENT_LIMIT} 项）</div>
-                <TileGridMulti options={TALENTS} values={draft.talents} onToggle={toggleTalentPick} columns={3} />
-                <p className="fieldset__note">
-                  已选 {draft.talents.filter((t) => t !== "无").length} / {TALENT_LIMIT}。天赋可以叠加，同时拥有多项意味着更高起点，
-                  也意味着更多会被世界盯上的理由。「无」与「随机」是独占项，与其它天赋互斥。
-                  {talentFull && "已达到上限，想换一项请先取消已选的。"}
-                </p>
-              </div>
-              <div className="fieldrow">
-                <Select
-                  label="初始地位"
-                  value={draft.status}
-                  options={STATUSES}
-                  onChange={(v) => onChange({ status: v })}
+              <Field
+                label={`特殊天赋　已选 ${draft.talents.filter((t) => t !== "无").length} / ${TALENT_LIMIT}`}
+                note={
+                  <>
+                    天赋可以叠加，同时拥有多项意味着更高起点，也意味着更多会被世界盯上的理由。
+                    「无」与「随机」是独占项，与其它天赋互斥。{talentFull && " 已达上限，想换一项请先取消已选的。"}
+                  </>
+                }
+              >
+                <TileGridMulti
+                  options={TALENTS}
+                  values={draft.talents}
+                  size="tight"
+                  onToggle={toggleTalentPick}
+                  preview={{
+                    field: "talents",
+                    onPreview: (h) => setHover({ ...h, value: toggleTalent(draft.talents, String(h.value)) }),
+                    onPreviewEnd: () => setHover(null),
+                  }}
                 />
-                <Select
-                  label="腐化状态"
-                  value={draft.corruption}
-                  options={CORRUPTION_STATES}
-                  onChange={(v) => onChange({ corruption: v })}
-                />
-              </div>
-              <div className="fieldrow fieldrow--3">
-                <Select
-                  label="魔术阶级"
-                  value={draft.magicTier}
+              </Field>
+              <Field label="初始地位">
+                <TileGrid options={STATUSES} value={draft.status} onSelect={(v) => onChange({ status: v })} size="mid" preview={previewOf("status")} />
+              </Field>
+              <Field label="魔术阶级">
+                <TileGrid
                   options={MAGIC_TIERS}
-                  onChange={(v) => onChange({ magicTier: v })}
+                  value={draft.magicTier}
+                  onSelect={(v) => onChange({ magicTier: v })}
+                  size="tight"
+                  preview={previewOf("magicTier")}
                 />
-                <Select
-                  label="剑术阶级"
-                  value={draft.swordTier}
+              </Field>
+              <Field label="剑术阶级">
+                <TileGrid
                   options={SWORD_TIERS}
-                  onChange={(v) => onChange({ swordTier: v })}
+                  value={draft.swordTier}
+                  onSelect={(v) => onChange({ swordTier: v })}
+                  size="tight"
+                  preview={previewOf("swordTier")}
                 />
-                <Select
-                  label="剑术流派"
-                  value={draft.swordSchool}
+              </Field>
+              <Field label="剑术流派">
+                <TileGrid
                   options={SWORD_SCHOOLS}
-                  onChange={(v) => onChange({ swordSchool: v })}
+                  value={draft.swordSchool}
+                  onSelect={(v) => onChange({ swordSchool: v })}
+                  size="mid"
+                  preview={previewOf("swordSchool")}
                 />
-              </div>
-              <div className="fieldrow fieldrow--3">
-                <Select
-                  label="冒险者等级"
-                  value={draft.adventurerRank}
+              </Field>
+              <Field label="冒险者等级">
+                <TileGrid
                   options={ADVENTURER_RANKS}
-                  onChange={(v) => onChange({ adventurerRank: v })}
+                  value={draft.adventurerRank}
+                  onSelect={(v) => onChange({ adventurerRank: v })}
+                  size="tight"
+                  preview={previewOf("adventurerRank")}
                 />
-                <Select label="血脉状态" value={draft.blood} options={BLOOD_STATES} onChange={(v) => onChange({ blood: v })} />
-                <Select
-                  label="契约状态"
-                  value={draft.contract}
-                  options={CONTRACT_STATES}
-                  onChange={(v) => onChange({ contract: v })}
+              </Field>
+              <Pair>
+                <Field label="血脉状态">
+                  <TileGrid
+                    options={BLOOD_STATES}
+                    value={draft.blood}
+                    onSelect={(v) => onChange({ blood: v })}
+                    size="mid"
+                    preview={previewOf("blood")}
+                  />
+                </Field>
+                <Field label="契约状态">
+                  <TileGrid
+                    options={CONTRACT_STATES}
+                    value={draft.contract}
+                    onSelect={(v) => onChange({ contract: v })}
+                    size="mid"
+                    preview={previewOf("contract")}
+                  />
+                </Field>
+              </Pair>
+              <Field label="腐化状态">
+                <TileGrid
+                  options={CORRUPTION_STATES}
+                  value={draft.corruption}
+                  onSelect={(v) => onChange({ corruption: v })}
+                  size="mid"
+                  preview={previewOf("corruption")}
                 />
-              </div>
-              {hint && <p className="fieldset__note" style={{ color: "var(--gold-2)" }}>{hint}</p>}
+              </Field>
             </>
           )}
 
@@ -391,24 +531,24 @@ export default function CreationScreen({ draft, onChange, onBegin, onExit }: Pro
                   五种力量彼此制衡：王权与贵族、魔术公会与魔法大学、米里斯教团、冒险者公会、七大列强。
                 </p>
               </div>
-              <div className="fieldset">
-                <div className="fieldset__label">学院倾向</div>
+              <Field label="学院倾向">
                 <TileGrid
                   options={COLLEGE_TENDENCIES}
                   value={draft.college}
                   onSelect={(v) => onChange({ college: v })}
-                  columns={4}
+                  size="mid"
+                  preview={previewOf("college")}
                 />
-              </div>
-              <div className="fieldset">
-                <div className="fieldset__label">初始政治倾向</div>
+              </Field>
+              <Field label="初始政治倾向">
                 <TileGrid
                   options={POLITICAL_LEANS}
                   value={draft.politics}
                   onSelect={(v) => onChange({ politics: v })}
-                  columns={3}
+                  size="mid"
+                  preview={previewOf("politics")}
                 />
-              </div>
+              </Field>
             </>
           )}
 
@@ -416,39 +556,60 @@ export default function CreationScreen({ draft, onChange, onBegin, onExit }: Pro
             <>
               <div className="stagehead">
                 <h2 className="stagehead__title">性格与目标</h2>
-                <p className="stagehead__desc">
-                  系统会记住这些。它们决定你在关键时刻会犹豫，还是一口气走到底。
-                </p>
+                <p className="stagehead__desc">系统会记住这些。它们决定你在关键时刻会犹豫，还是一口气走到底。</p>
               </div>
-              <div className="fieldrow fieldrow--3">
-                <div>
-                  <label className="fieldlabel">性格关键词 一</label>
-                  <input className="input" value={draft.trait1} placeholder="例如：执拗" onChange={(e) => onChange({ trait1: e.target.value })} />
-                </div>
-                <div>
-                  <label className="fieldlabel">性格关键词 二</label>
-                  <input className="input" value={draft.trait2} placeholder="例如：心软" onChange={(e) => onChange({ trait2: e.target.value })} />
-                </div>
-                <div>
-                  <label className="fieldlabel">性格关键词 三</label>
-                  <input className="input" value={draft.trait3} placeholder="例如：记仇" onChange={(e) => onChange({ trait3: e.target.value })} />
-                </div>
-              </div>
-              <div className="fieldrow">
-                <div>
-                  <label className="fieldlabel">初始人生目标（一句话）</label>
-                  <input
-                    className="input"
-                    value={draft.goal}
-                    placeholder="例如：让家里人过上好日子。"
-                    onChange={(e) => onChange({ goal: e.target.value })}
-                  />
-                </div>
-                <Select label="情感倾向" value={draft.emotion} options={EMOTIONS} onChange={(v) => onChange({ emotion: v })} />
-              </div>
-              <div className="fieldrow">
-                <div>
-                  <label className="fieldlabel">最珍贵记忆</label>
+              <Pair>
+                <Input
+                  label="性格关键词 一"
+                  value={draft.trait1}
+                  placeholder="例如：执拗"
+                  field="trait1"
+                  onPreview={setHover}
+                  onPreviewEnd={() => setHover(null)}
+                  onChange={(v) => onChange({ trait1: v })}
+                />
+                <Input
+                  label="性格关键词 二"
+                  value={draft.trait2}
+                  placeholder="例如：心软"
+                  field="trait2"
+                  onPreview={setHover}
+                  onPreviewEnd={() => setHover(null)}
+                  onChange={(v) => onChange({ trait2: v })}
+                />
+              </Pair>
+              <Pair>
+                <Input
+                  label="性格关键词 三"
+                  value={draft.trait3}
+                  placeholder="例如：记仇"
+                  field="trait3"
+                  onPreview={setHover}
+                  onPreviewEnd={() => setHover(null)}
+                  onChange={(v) => onChange({ trait3: v })}
+                />
+                <Input
+                  label="初始人生目标（一句话）"
+                  value={draft.goal}
+                  placeholder="例如：让家里人过上好日子。"
+                  field="goal"
+                  onPreview={setHover}
+                  onPreviewEnd={() => setHover(null)}
+                  onChange={(v) => onChange({ goal: v })}
+                />
+              </Pair>
+              <Field label="情感倾向">
+                <TileGrid
+                  options={EMOTIONS}
+                  value={draft.emotion}
+                  onSelect={(v) => onChange({ emotion: v })}
+                  size="mid"
+                  preview={previewOf("emotion")}
+                />
+              </Field>
+              <Pair>
+                <div className="fieldset">
+                  <div className="fieldset__label">最珍贵记忆</div>
                   <textarea
                     className="textarea"
                     value={draft.precious}
@@ -456,8 +617,8 @@ export default function CreationScreen({ draft, onChange, onBegin, onExit }: Pro
                     onChange={(e) => onChange({ precious: e.target.value })}
                   />
                 </div>
-                <div>
-                  <label className="fieldlabel">最痛苦记忆</label>
+                <div className="fieldset">
+                  <div className="fieldset__label">最痛苦记忆</div>
                   <textarea
                     className="textarea"
                     value={draft.painful}
@@ -465,7 +626,7 @@ export default function CreationScreen({ draft, onChange, onBegin, onExit }: Pro
                     onChange={(e) => onChange({ painful: e.target.value })}
                   />
                 </div>
-              </div>
+              </Pair>
               <p className="fieldset__note">已填写性格关键词 {traitFilled} / 3。留空的部分由系统在开局时补齐。</p>
             </>
           )}
@@ -478,7 +639,9 @@ export default function CreationScreen({ draft, onChange, onBegin, onExit }: Pro
                   风格影响每回合世界动态的取材。六面世界绝大多数时候是安静的，风格只决定它偏重哪一面。
                 </p>
               </div>
-              <TileGrid options={SIM_STYLES} value={draft.style} onSelect={(v) => onChange({ style: v })} columns={2} />
+              <Field label="模拟风格">
+                <TileGrid options={SIM_STYLES} value={draft.style} onSelect={(v) => onChange({ style: v })} size="wide" preview={previewOf("style")} />
+              </Field>
             </>
           )}
 
@@ -490,16 +653,44 @@ export default function CreationScreen({ draft, onChange, onBegin, onExit }: Pro
                   难度决定这个世界对你有多宽容。它影响寿命、收入、健康衰减、事件频率与抉择代价。进游戏后仍可随时调整。
                 </p>
               </div>
-              <TileGrid
-                options={DIFFICULTY_OPTIONS}
-                value={draft.difficulty}
-                onSelect={(v) => onChange({ difficulty: v as CreationDraft["difficulty"] })}
-                columns={2}
-              />
+              <Field label="难度">
+                <TileGrid
+                  options={DIFFICULTY_OPTIONS}
+                  value={draft.difficulty}
+                  onSelect={(v) => onChange({ difficulty: v as CreationDraft["difficulty"] })}
+                  size="wide"
+                  preview={previewOf("difficulty")}
+                />
+              </Field>
             </>
           )}
 
           {step === 9 && (
+            <>
+              <div className="stagehead">
+                <h2 className="stagehead__title">主线引导</h2>
+                <p className="stagehead__desc">
+                  二十条主线，每条都是一条完整的故事线：四到六章，每章有目标、任务与指引。
+                  抽到哪一条由命运决定，抽完之后接进来的 AI 会按你这个人的出身、时代与性格把它重写一遍，
+                  往后每年再按你实际做过的事微调一次。
+                </p>
+              </div>
+              <Field label="主线引导">
+                <TileGrid
+                  options={MAINLINE_MODES}
+                  value={draft.mainlineMode}
+                  onSelect={(v) => onChange({ mainlineMode: v as CreationDraft["mainlineMode"] })}
+                  size="wide"
+                  preview={previewOf("mainlineMode")}
+                />
+              </Field>
+              <p className="fieldset__note">
+                主线只给方向，不替你走路。没有主线也照样能玩：行动、抉择事件、原作人物的遇合都照旧。
+              </p>
+            </>
+          )}
+
+          {step === 10 && (
             <>
               <div className="stagehead">
                 <h2 className="stagehead__title">确认启程</h2>
@@ -529,6 +720,12 @@ export default function CreationScreen({ draft, onChange, onBegin, onExit }: Pro
                   <div className="divider" />
                   <div className="kv"><span className="kv__k">模拟风格</span><span className="kv__v">{draft.style}</span></div>
                   <div className="kv"><span className="kv__k">难度</span><span className="kv__v">{draft.difficulty}</span></div>
+                  <div className="kv">
+                    <span className="kv__k">主线</span>
+                    <span className="kv__v">
+                      {draft.mainlineMode === "随机" ? "创建时随机抽取一条（推荐）" : "不介入，自由地活"}
+                    </span>
+                  </div>
                 </div>
               </div>
             </>
@@ -568,24 +765,78 @@ export default function CreationScreen({ draft, onChange, onBegin, onExit }: Pro
               {draft.origin} · {draft.age}
             </span>
           </div>
-          <div className="panel">
-            <div className="panel__body">
-              <div className="statchips">
-                <span className="tag">{draft.era}</span>
-                <span className="tag">{draft.status}</span>
-                <span className="tag tag--diff">难度 · {draft.difficulty}</span>
-              </div>
-              <div className="kv"><span className="kv__k">出身</span><span className="kv__v">{draft.origin}</span></div>
-              <div className="kv"><span className="kv__k">天赋</span><span className="kv__v">{talentLabel}</span></div>
-              <div className="kv"><span className="kv__k">年龄</span><span className="kv__v">{draft.age}</span></div>
-              <div className="kv"><span className="kv__k">所在地</span><span className="kv__v">{draft.residence}</span></div>
-              <div className="kv"><span className="kv__k">魔术</span><span className="kv__v">{draft.magicTier}</span></div>
-              <div className="kv"><span className="kv__k">剑术</span><span className="kv__v">{draft.swordTier}</span></div>
-              <div className="kv"><span className="kv__k">冒险者</span><span className="kv__v">{draft.adventurerRank}</span></div>
-              <div className="divider" />
-              <p className="fieldset__note">
-                出身不是命运。平民可以成为 S 级冒险者，魔族可以成为英雄，人神使徒可以背叛人神。
-              </p>
+
+          <div className={`panel preview__panel${preview ? " preview__panel--hover" : ""}`}>
+            <div className="panel__head">
+              {preview ? "选了会怎样" : "效果预览"}
+              <span className="preview__badge">{preview ? preview.fieldLabel : "鼠标停在选项上"}</span>
+            </div>
+            {/* 面板高度固定、内容自己滚：悬停切换时页面不会跟着变高变矮。
+                key 让内容每次换一份就重播一次模糊渐显 */}
+            <div className="panel__body preview__body" key={preview ? `${hover?.field}-${preview.fieldLabel}` : "summary"}>
+              {preview ? (
+                <div className="blur-swap">
+                  {preview.desc && <p className="preview__desc">{preview.desc}</p>}
+                  <div className="preview__label">数值与处境</div>
+                  {preview.changes.length === 0 ? (
+                    <p className="preview__none">这一项不改动任何数字。</p>
+                  ) : (
+                    <ul className="preview__changes">
+                      {preview.changes.map((c, i) => (
+                        <li key={i}>{c}</li>
+                      ))}
+                    </ul>
+                  )}
+                  {preview.narrative.length > 0 && (
+                    <>
+                      <div className="preview__label">不进数值的部分</div>
+                      <ul className="preview__notes">
+                        {preview.narrative.map((n, i) => (
+                          <li key={i}>{n}</li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                  <div className="divider" />
+                  <div className="preview__label">选上之后的他</div>
+                  <div className="preview__stats">
+                    {preview.stats.map((s) => (
+                      <div className="preview__stat" key={s.key}>
+                        <span className="preview__statname">{s.label}</span>
+                        <span className="preview__statval">{s.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="blur-swap">
+                  <div className="statchips">
+                    <span className="tag">{draft.era}</span>
+                    <span className="tag">{draft.status}</span>
+                    <span className="tag tag--diff">难度 · {draft.difficulty}</span>
+                  </div>
+                  <div className="kv"><span className="kv__k">开局</span><span className="kv__v">{now.year}</span></div>
+                  <div className="kv"><span className="kv__k">出身</span><span className="kv__v">{draft.origin}</span></div>
+                  <div className="kv"><span className="kv__k">天赋</span><span className="kv__v">{talentLabel}</span></div>
+                  <div className="kv"><span className="kv__k">所在地</span><span className="kv__v">{draft.residence}</span></div>
+                  <div className="kv"><span className="kv__k">寿命倾向</span><span className="kv__v">{now.lifespan}</span></div>
+                  <div className="kv"><span className="kv__k">每月进项</span><span className="kv__v">{now.income}</span></div>
+                  <div className="divider" />
+                  <div className="preview__stats">
+                    {now.stats.map((s) => (
+                      <div className="preview__stat" key={s.key}>
+                        <span className="preview__statname">{s.label}</span>
+                        <span className="preview__statval">{s.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="divider" />
+                  <p className="fieldset__note">
+                    出身不是命运。平民可以成为 S 级冒险者，魔族可以成为英雄，人神使徒可以背叛人神。
+                    把鼠标放在上面任何一格，这里会换成那一格的效果。
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </aside>

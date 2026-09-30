@@ -7,22 +7,16 @@ const ORDER: AchievementCategory[] = ["出身", "成长", "情感", "世界", "�
 interface Props {
   unlocked: string[];
   onClose: () => void;
+  /** 作为详情页的内容渲染时不套弹窗外壳（页面壳由 DetailScreen 负责） */
+  inline?: boolean;
 }
 
-export default function AchievementPanel({ unlocked, onClose }: Props) {
+export default function AchievementPanel({ unlocked, onClose, inline }: Props) {
   const set = new Set(unlocked);
   const pct = Math.round((set.size / ACHIEVEMENT_TOTAL) * 100);
 
-  return (
-    <Modal
-      title="成就"
-      onClose={onClose}
-      actions={
-        <button type="button" className="btn btn--primary" onClick={onClose}>
-          关闭
-        </button>
-      }
-    >
+  const body = (
+    <>
       <div className="ach__head">
         <span className="ach__count">
           已解锁 <b>{set.size}</b> / {ACHIEVEMENT_TOTAL}
@@ -61,6 +55,22 @@ export default function AchievementPanel({ unlocked, onClose }: Props) {
           </div>
         );
       })}
+    </>
+  );
+
+  if (inline) return body;
+
+  return (
+    <Modal
+      title="成就"
+      onClose={onClose}
+      actions={
+        <button type="button" className="btn btn--primary" onClick={onClose}>
+          关闭
+        </button>
+      }
+    >
+      {body}
     </Modal>
   );
 }

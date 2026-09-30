@@ -317,4 +317,6 @@ export const RUDEUS_DRAFT: CreationDraft = {
   painful: "前世被赶出家门的那一天",
   style: "混合模式",
   difficulty: "标准",
+  // 这一局的主线由种子钉死（见 data/mainlines 的 canon-rudeus），这个字段只是把草稿补全
+  mainlineMode: "随机",
 };
