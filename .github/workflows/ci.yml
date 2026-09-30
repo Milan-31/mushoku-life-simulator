@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main, Milano, Yukimi]
+  pull_request:
+    branches: [main]
+
+# 同一分支上连着推几次时，取消还在跑的上一次：省额度，也省等待
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # CI 只做检查与构建，不需要 Electron 的运行时二进制（约 150 MB）
+  ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+
+jobs:
+  lint-and-build:
+    name: lint-and-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci --no-audit --no-fund
+
+      - name: 静态检查
+        run: npm run lint
+
+      # npm run build 会先跑 tsc -b 再做生产构建，
+      # 类型错误与构建失败都会在这一步拦下来
+      - name: 类型检查与生产构建
+        run: npm run build
