@@ -284,6 +284,7 @@ app.whenReady().then(async () => {
       索引项: items.map((el) => el.innerText.replace(/\\s+/g, " ").trim()),
       索引条不换行: navStyle ? navStyle.flexWrap === "nowrap" : false,
       索引项同一行: navTops.size === 1,
+      索引条里没有存档与AI: !items.some((el) => /^(存档|AI)/.test(el.innerText.trim())),
       左栏有精力与行动: left.innerText.includes("本月精力") && left.innerText.includes("本月行动"),
       九项属性格: document.querySelectorAll(".statgrid__cell").length,
       主角行不折行: oneLine(".selfrow"),
@@ -322,6 +323,7 @@ app.whenReady().then(async () => {
   expect(b.纲要卡已删除 && b.旧式标签页已删除, "主页还留着纲要卡或旧标签页");
   expect(b.页面索引条 && b.索引条不换行 && b.索引项同一行, `页面索引条不是一行：${b.索引项.length} 项，同一行=${b.索引项同一行}`);
   expect(b.索引项.length >= 8, `页面索引项偏少：${b.索引项.length}`);
+  expect(b.索引条里没有存档与AI, `页面索引条里还留着该由顶栏管的入口：${JSON.stringify(b.索引项)}`);
   expect(b.左栏标题.length === 3, `左栏块数不对：${b.左栏标题.join(" / ")}`);
   expect(b.左栏有精力与行动, "左栏看不到精力与行动次数");
   expect(b.九项属性格 === 9, `属性格不是九项：${b.九项属性格}`);

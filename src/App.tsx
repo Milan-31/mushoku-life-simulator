@@ -718,10 +718,8 @@ export default function App() {
             onRestore={handleRestore}
             onExport={() => exportSaveText(game)}
             onRestart={handleRestart}
-            onOpenSaves={() => setPanel("saves")}
             onOpenDifficulty={() => setPanel("difficulty")}
             onOpenApi={() => setPanel("api")}
-            onOpenAi={() => setPanel("ai")}
             onViewEnding={() => setView("ending")}
           />
         )}

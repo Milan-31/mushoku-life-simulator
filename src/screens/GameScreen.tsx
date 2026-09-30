@@ -36,10 +36,8 @@ interface Props {
   onRestore: (text: string) => void;
   onExport: () => string;
   onRestart: () => void;
-  onOpenSaves: () => void;
   onOpenDifficulty: () => void;
   onOpenApi: () => void;
-  onOpenAi: () => void;
   onViewEnding: () => void;
 }
 
@@ -86,10 +84,8 @@ export default function GameScreen({
   onRestore,
   onExport,
   onRestart,
-  onOpenSaves,
   onOpenDifficulty,
   onOpenApi,
-  onOpenAi,
   onViewEnding,
 }: Props) {
   const [text, setText] = useState("");
@@ -136,18 +132,9 @@ export default function GameScreen({
         </button>
       ))}
       <span className="pagenav__gap" />
-      <button type="button" className="pagenav__item" onClick={onOpenSaves}>
-        存档
-      </button>
+      {/* 存档与 AI 推演已经归顶栏管（顶栏有「存档」与「设置 ▸ AI 推演」），这里不再摆第二份 */}
       <button type="button" className="pagenav__item" onClick={onOpenDifficulty}>
         难度 · {state.difficulty}
-      </button>
-      <button
-        type="button"
-        className={`pagenav__item${aiEnabled ? " pagenav__item--on" : ""}`}
-        onClick={onOpenAi}
-      >
-        {aiExhausted ? "AI 已停" : aiEnabled ? "AI 已开" : "AI 未开"}
       </button>
       <button type="button" className="pagenav__item" onClick={onOpenApi}>
         接口
@@ -419,9 +406,13 @@ export default function GameScreen({
                 className="btn btn--sm"
                 onClick={() => setModal("free")}
                 disabled={actionsBlocked}
-                title="预设指令之外的事，用自然语言写"
+                title={
+                  aiExhausted
+                    ? "AI 已停止调用（余额不足或本机硬上限用尽），这次改由本地引擎推演"
+                    : "预设指令之外的事，用自然语言写"
+                }
               >
-                自由行动{aiEnabled ? " · AI" : ""}
+                自由行动{aiExhausted ? " · AI 已停" : aiEnabled ? " · AI" : ""}
               </button>
               <button
                 type="button"
