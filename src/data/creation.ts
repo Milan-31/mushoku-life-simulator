@@ -302,5 +302,20 @@ export function createEmptyDraft(): import("../types").CreationDraft {
     painful: "",
     style: "混合模式",
     difficulty: "标准",
+    mainlineMode: "随机",
   };
 }
+
+/** 主线引导的两个选项。游戏内规则手册与创建界面读的是同一份文案 */
+export const MAINLINE_MODES: Option[] = [
+  {
+    value: "随机",
+    label: "随机抽取一条主线",
+    desc: "创建存档时从二十条主线里抽一条（按出身、时代、所在地、天赋加权），开场后由 AI 按你的主角改写一遍，之后每年按你实际做过的事再微调。",
+  },
+  {
+    value: "不介入",
+    label: "不要主线",
+    desc: "这一局不抽主线，只剩自由行动、抉择事件与原作人物的遇合。适合只想随便活一辈子的人。",
+  },
+];

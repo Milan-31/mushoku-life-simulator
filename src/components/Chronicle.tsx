@@ -13,12 +13,14 @@ const KIND_LABEL: Record<string, string> = {
   achievement: "成就",
   ending: "终章",
   rumor: "传闻",
+  mainline: "主线",
 };
 
 /** 一年的总结。数字来自年鉴里那几条事件 */
 function headline(view: YearView): string {
   const count = (kind: string) => view.events.filter((e) => e.kind === kind).length;
   const parts: string[] = [];
+  if (count("mainline") > 0) parts.push(`${count("mainline")} 段主线`);
   if (count("choice") > 0) parts.push(`${count("choice")} 次抉择`);
   if (count("achievement") > 0) parts.push(`${count("achievement")} 项成就`);
   if (count("action") > 0) parts.push(`${count("action")} 件自己做的事`);
@@ -70,8 +72,8 @@ export default function Chronicle({ state }: Props) {
       if (max === 0) return;
       // 正文自己可以滚动时（世界动态那一类长条目）就别抢滚轮
       const target = e.target as HTMLElement | null;
-      const lines = target?.closest?.(".entry__lines") as HTMLElement | null;
-      if (lines && lines.scrollHeight > lines.clientHeight + 2) return;
+      const scroller = target?.closest?.(".chronicle__entryscroll") as HTMLElement | null;
+      if (scroller && scroller.scrollHeight > scroller.clientHeight + 2) return;
       e.preventDefault();
       const now = Date.now();
       if (now - lastStep.current < 130) return; // 抑制触控板的连续抖动
@@ -115,7 +117,8 @@ export default function Chronicle({ state }: Props) {
             <p className="fieldset__note">纪事尚未开始。时间还没有往前走。</p>
           ) : (
             <div className="chronicle__body" ref={boxRef}>
-              <div className="timeline">
+              <div className="timeline" title="滚轮逐条翻阅 · 拖动滑杆按时间跳跃">
+                <span className="timeline__date">{formatDate(entry.year, entry.month)}</span>
                 <input
                   className="timeline__range"
                   type="range"
@@ -126,57 +129,57 @@ export default function Chronicle({ state }: Props) {
                   onChange={(e) => setIndex(max - Number(e.target.value))}
                   aria-label="按时间跳转纪事"
                 />
-                <div className="timeline__meta">
-                  <span>{formatDate(entry.year, entry.month)}</span>
-                  <span className="timeline__pos">
-                    第 {state.turn - cursor} 回合 · {cursor === 0 ? "最新" : `回溯第 ${cursor} 条`} / 共 {entries.length} 条
-                  </span>
-                </div>
+                <span className="timeline__pos">
+                  第 {state.turn - cursor} 回合 · {cursor === 0 ? "最新" : `回溯 ${cursor}`} / 共 {entries.length} 条
+                </span>
               </div>
 
-              <article className="entry entry--solo" key={entry.id}>
-                <span className={`entry__dot entry__dot--${entry.kind}`} />
-                <div className="entry__head">
-                  <span className={`entry__kind entry__kind--${entry.kind}`}>
-                    {KIND_LABEL[entry.kind] ?? "纪事"}
-                  </span>
-                </div>
-                <div className="entry__title">{entry.title}</div>
-                <div className="entry__lines">
-                  {entry.lines.map((l, i) => (
-                    <p key={i}>{l}</p>
-                  ))}
-                  {entry.rumor && (
-                    <p>
-                      <em>【可获知的传闻】</em>
-                      {entry.rumor}
-                    </p>
-                  )}
-                </div>
-              </article>
+              {/* 正文单独一层滚动容器：时间轴与翻页按钮留在原位，长条目在这里面滚 */}
+              <div className="chronicle__entryscroll">
+                <article className="entry entry--solo" key={entry.id}>
+                  <span className={`entry__dot entry__dot--${entry.kind}`} />
+                  <div className="entry__head">
+                    <span className={`entry__kind entry__kind--${entry.kind}`}>
+                      {KIND_LABEL[entry.kind] ?? "纪事"}
+                    </span>
+                  </div>
+                  <div className="entry__title">{entry.title}</div>
+                  <div className="entry__lines">
+                    {entry.lines.map((l, i) => (
+                      <p key={i}>{l}</p>
+                    ))}
+                    {entry.rumor && (
+                      <p>
+                        <em>【可获知的传闻】</em>
+                        {entry.rumor}
+                      </p>
+                    )}
+                  </div>
+                </article>
+              </div>
 
               <div className="chronicle__nav">
-                <button type="button" className="btn btn--sm" onClick={() => step(-1)} disabled={cursor === 0}>
-                  更新一条 ⌃
+                <button type="button" className="btn btn--xs" onClick={() => step(-1)} disabled={cursor === 0} title="更近的一条">
+                  ⌃ 更新
                 </button>
-                <button type="button" className="btn btn--sm" onClick={() => step(1)} disabled={cursor >= max}>
-                  更早一条 ⌄
+                <button type="button" className="btn btn--xs" onClick={() => step(1)} disabled={cursor >= max} title="更早的一条">
+                  ⌄ 更早
                 </button>
                 <button
                   type="button"
-                  className="btn btn--sm btn--ghost"
+                  className="btn btn--xs btn--ghost"
                   onClick={() => setIndex(0)}
                   disabled={cursor === 0}
                 >
                   回到最新
                 </button>
               </div>
-              <p className="chronicle__hint">滚轮逐条翻阅 · 拖动时间轴按时间跳跃</p>
             </div>
           )
         ) : (
           <div className="chronicle__body yearbook">
-            <div className="timeline">
+            <div className="timeline" title="拖动滑杆按年份跳转 · 往年读的是年末封存的年鉴">
+              <span className="timeline__date">{formatYear(view.year)}</span>
               <input
                 className="timeline__range"
                 type="range"
@@ -186,12 +189,9 @@ export default function Chronicle({ state }: Props) {
                 onChange={(e) => setYear(years[Number(e.target.value)] ?? state.year)}
                 aria-label="按年份跳转年鉴"
               />
-              <div className="timeline__meta">
-                <span>{formatYear(view.year)}</span>
-                <span className="timeline__pos">
-                  {view.archived ? "年鉴" : "本年度 · 仍在继续"} · 第 {yearIndex + 1} / {years.length} 年
-                </span>
-              </div>
+              <span className="timeline__pos">
+                {view.archived ? "年鉴" : "本年度 · 仍在继续"} / 共 {years.length} 年
+              </span>
             </div>
 
             <div className="yearbook__head">{headline(view)}</div>
@@ -225,30 +225,29 @@ export default function Chronicle({ state }: Props) {
             <div className="chronicle__nav">
               <button
                 type="button"
-                className="btn btn--sm"
+                className="btn btn--xs"
                 onClick={() => setYear(years[yearIndex - 1] ?? cursorYear)}
                 disabled={yearIndex <= 0}
               >
-                上一年 ⌃
+                ⌃ 上一年
               </button>
               <button
                 type="button"
-                className="btn btn--sm"
+                className="btn btn--xs"
                 onClick={() => setYear(years[yearIndex + 1] ?? cursorYear)}
                 disabled={yearIndex >= years.length - 1}
               >
-                下一年 ⌄
+                ⌄ 下一年
               </button>
               <button
                 type="button"
-                className="btn btn--sm btn--ghost"
+                className="btn btn--xs btn--ghost"
                 onClick={() => setYear(state.year)}
                 disabled={cursorYear === state.year}
               >
                 回到今年
               </button>
             </div>
-            <p className="chronicle__hint">拖动时间轴按年份跳转 · 往年读的是年末封存的年鉴</p>
           </div>
         )}
       </div>

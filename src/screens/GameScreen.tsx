@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
-import type { GameState } from "../types";
+import type { DetailKind, GameState } from "../types";
 import Chronicle from "../components/Chronicle";
 import Modal from "../components/Modal";
 import ScenePanel from "../components/ScenePanel";
-import { groupSkillsBySchool, skillById } from "../data/skills";
+import { skillById } from "../data/skills";
 import { defaultSceneId } from "../data/scenes";
 import { difficultyOf } from "../data/difficulty";
 import { relocationOptions } from "../engine/world";
+import { mainlineView } from "../engine/mainline";
 
 interface Props {
   state: GameState;
@@ -24,8 +25,10 @@ interface Props {
   /** 迁居：换一个地方生活，花掉这一整个月的行动次数 */
   onRelocate: (placeId: string) => void;
   onResolveEvent: (optionId: string) => void;
-  /** 打开关系网弹窗 */
+  /** 打开关系网 */
   onOpenRelations: () => void;
+  /** 打开某一块的详情页 */
+  onOpenDetail: (kind: DetailKind) => void;
   /** 应下羁绊角色的主动沟通 */
   onAcceptTalk: () => void;
   /** 这次主动沟通改日再说 */
@@ -33,21 +36,9 @@ interface Props {
   onRestore: (text: string) => void;
   onExport: () => string;
   onRestart: () => void;
-  onOpenSaves: () => void;
-  onOpenAchievements: () => void;
   onOpenDifficulty: () => void;
   onOpenApi: () => void;
-  onOpenAi: () => void;
   onViewEnding: () => void;
-}
-
-const TIER_ORDER = ["未觉醒", "初级", "中级", "上级", "圣级", "王级", "帝级", "神级"];
-const RANK_ORDER = ["未注册", "F", "E", "D", "C", "B", "A", "S"];
-
-function nextOf(order: string[], cur: string, prefix = ""): string {
-  const i = order.indexOf(cur);
-  if (i < 0 || i >= order.length - 1) return "已达顶端";
-  return `${prefix}${order[i + 1]}`;
 }
 
 function lifeStage(age: number): string {
@@ -63,7 +54,17 @@ function lifeStage(age: number): string {
 
 const QUICK_FALLBACK = "什么都不做，只是生活";
 
-type TabKey = "tier" | "skill" | "faction" | "thread";
+/** 主页只做三件事：看清自己、回应眼前的事、动手。其余信息都在各自的详情页里 */
+const PAGES: { kind: DetailKind; label: string }[] = [
+  { kind: "profile", label: "主角档案" },
+  { kind: "stats", label: "属性与能力" },
+  { kind: "skills", label: "招式与流派" },
+  { kind: "relations", label: "关系网" },
+  { kind: "factions", label: "势力" },
+  { kind: "threads", label: "线索与设定" },
+  { kind: "achievements", label: "成就" },
+  { kind: "mainline", label: "主线卷宗" },
+];
 
 export default function GameScreen({
   state,
@@ -77,37 +78,27 @@ export default function GameScreen({
   onRelocate,
   onResolveEvent,
   onOpenRelations,
+  onOpenDetail,
   onAcceptTalk,
   onDismissTalk,
   onRestore,
   onExport,
   onRestart,
-  onOpenSaves,
-  onOpenAchievements,
   onOpenDifficulty,
   onOpenApi,
-  onOpenAi,
   onViewEnding,
 }: Props) {
-  const [tab, setTab] = useState<TabKey>("tier");
   const [text, setText] = useState("");
   const [sceneId, setSceneId] = useState<string>(() => defaultSceneId(state));
   const [modal, setModal] = useState<null | "export" | "import" | "restart" | "free" | "travel">(null);
   const [importText, setImportText] = useState("");
 
   const c = state.character;
-  const wealth = state.stats.find((s) => s.key === "wealth");
-  const fame = state.stats.find((s) => s.key === "fame");
-  const skillGroups = useMemo(() => groupSkillsBySchool(state.skills), [state.skills]);
   const travelOptions = useMemo(() => relocationOptions(state), [state]);
-
-  const tierBars = useMemo(
-    () => [
-      { label: "魔术阶级", tier: c.magicTier, progress: state.tierProgress.magic, next: nextOf(TIER_ORDER, c.magicTier), tone: "gold" as const },
-      { label: "剑术等级", tier: c.swordTier, progress: state.tierProgress.sword, next: nextOf(TIER_ORDER, c.swordTier), tone: "teal" as const },
-      { label: "冒险者等级", tier: c.adventurerRank, progress: state.tierProgress.adventure, next: nextOf(RANK_ORDER, c.adventurerRank, ""), tone: "gold" as const },
-    ],
-    [c.magicTier, c.swordTier, c.adventurerRank, state.tierProgress],
+  const mainline = useMemo(() => mainlineView(state), [state]);
+  const combatPower = useMemo(
+    () => state.skills.reduce((sum, id) => sum + (skillById(id)?.power ?? 0), 0),
+    [state.skills],
   );
 
   const actionLimit = difficultyOf(state.difficulty).actionsPerMonth;
@@ -121,6 +112,44 @@ export default function GameScreen({
     onAction(t);
     setText("");
   };
+
+  /** 页面索引：一行装完，不换行 */
+  const pageNav = (
+    <nav className="pagenav" aria-label="信息页面">
+      <span className="pagenav__label">详情</span>
+      {PAGES.map((p) => (
+        <button
+          key={p.kind}
+          type="button"
+          className="pagenav__item"
+          onClick={() => onOpenDetail(p.kind)}
+          title={`打开「${p.label}」页`}
+        >
+          {p.label}
+          {p.kind === "relations" && <b>{state.relations.length}</b>}
+          {p.kind === "achievements" && <b>{state.achievements.length}</b>}
+          {p.kind === "skills" && <b>{state.skills.length}</b>}
+        </button>
+      ))}
+      <span className="pagenav__gap" />
+      {/* 存档与 AI 推演已经归顶栏管（顶栏有「存档」与「设置 ▸ AI 推演」），这里不再摆第二份 */}
+      <button type="button" className="pagenav__item" onClick={onOpenDifficulty}>
+        难度 · {state.difficulty}
+      </button>
+      <button type="button" className="pagenav__item" onClick={onOpenApi}>
+        接口
+      </button>
+      <button type="button" className="pagenav__item" onClick={() => setModal("export")}>
+        导出
+      </button>
+      <button type="button" className="pagenav__item" onClick={() => setModal("import")}>
+        恢复
+      </button>
+      <button type="button" className="pagenav__item pagenav__item--ghost" onClick={() => setModal("restart")}>
+        重开
+      </button>
+    </nav>
+  );
 
   return (
     <section className="game">
@@ -136,25 +165,27 @@ export default function GameScreen({
         </div>
       )}
 
+      {pageNav}
+
       <div className="game__grid">
-        {/* 左：玩家 */}
-        <div className="game__col">
+        {/* 左：只放「现在是什么状态」，够做决定就行 */}
+        <div className="game__col game__self">
           <div className="panel">
-            <div className="panel__head">玩家状态</div>
+            <div className="panel__head">
+              <span>主角</span>
+              <span className="panel__count">{c.status}</span>
+            </div>
             <div className="panel__body">
               <div className="player__id">
                 <strong>{c.name}</strong>
                 <span>
-                  {c.age} 岁 · {lifeStage(c.age)} · {c.gender}
+                  {c.age} 岁 · {lifeStage(c.age)} · {c.gender} · {c.era}
                 </span>
               </div>
-              <div className="statchips">
-                <span className="tag">{c.status}</span>
-                <span className="tag">{c.era}</span>
-                <span className="tag tag--diff">难度 · {state.difficulty}</span>
-                <span className="tag">成就 {state.achievements.length}</span>
+              <div className="selfrow">
+                <span className="selfrow__k">所在地</span>
+                <span className="selfrow__v">{c.residence}</span>
               </div>
-
               <div className="bar">
                 <div className="bar__top">
                   <span className="bar__name">本月精力</span>
@@ -167,7 +198,9 @@ export default function GameScreen({
               <div className="bar">
                 <div className="bar__top">
                   <span className="bar__name">本月行动</span>
-                  <span className="bar__val">{state.actionsUsed} / {actionLimit}</span>
+                  <span className={`bar__val${actionsLeft <= 0 ? " bar__val--warn" : ""}`}>
+                    {state.actionsUsed} / {actionLimit}
+                  </span>
                 </div>
                 <div className="bar__track">
                   <div
@@ -176,44 +209,105 @@ export default function GameScreen({
                   />
                 </div>
               </div>
-              <div className="bar">
+              <div className="bar" style={{ marginBottom: 0 }}>
                 <div className="bar__top">
-                  <span className="bar__name">人生目标进度</span>
+                  <span className="bar__name">人生目标</span>
                   <span className="bar__val">{Math.round(state.goalProgress)}%</span>
                 </div>
                 <div className="bar__track">
                   <div className="bar__fill" style={{ width: `${state.goalProgress}%` }} />
                 </div>
               </div>
-
-              <div className="divider" />
-              <div className="kv"><span className="kv__k">身份</span><span className="kv__v">{c.origin}</span></div>
-              <div className="kv"><span className="kv__k">所在地</span><span className="kv__v">{c.residence}</span></div>
-              <div className="kv"><span className="kv__k">信仰</span><span className="kv__v">{c.faith}</span></div>
-              <div className="kv"><span className="kv__k">政治倾向</span><span className="kv__v">{c.politics}</span></div>
-              <div className="kv"><span className="kv__k">特殊天赋</span><span className="kv__v">{c.talents.filter((t) => t !== "无").join(" · ") || "无"}</span></div>
-              <div className="kv"><span className="kv__k">财富</span><span className="kv__v">{wealth?.value ?? 0} 金币</span></div>
-              <div className="kv"><span className="kv__k">声望</span><span className="kv__v">{fame?.value ?? 0}</span></div>
-              <div className="divider" />
-              <div className="kv"><span className="kv__k">当前目标</span><span className="kv__v">{c.goal}</span></div>
-              <div className="kv"><span className="kv__k">情感倾向</span><span className="kv__v">{c.emotion}</span></div>
-              {c.traits.length > 0 && (
-                <div className="kv"><span className="kv__k">性格</span><span className="kv__v">{c.traits.join(" · ")}</span></div>
-              )}
             </div>
           </div>
 
           <div className="panel">
-            <div className="panel__head">情感记忆</div>
+            <div className="panel__head">
+              <span>属性</span>
+              <span className="panel__tools">
+                <button type="button" className="btn btn--xs" onClick={() => onOpenDetail("stats")}>
+                  详情 →
+                </button>
+              </span>
+            </div>
             <div className="panel__body">
-              <div className="thread"><span className="thread__label">最珍贵</span><span className="thread__val">{state.threads.treasureMemory}</span></div>
-              <div className="thread"><span className="thread__label">最痛苦</span><span className="thread__val">{state.threads.painMemory}</span></div>
-              <div className="thread"><span className="thread__label">内心挣扎</span><span className="thread__val">{state.threads.innerStruggle}</span></div>
+              <div className="statgrid">
+                {state.stats.map((s) => (
+                  <div className="statgrid__cell" key={s.key} title={`${s.label} ${s.value} / ${s.max}`}>
+                    <span className="statgrid__k">{s.label}</span>
+                    <span className="statgrid__v">{s.value}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="divider" />
+              <div className="selfrow">
+                <span className="selfrow__k">魔术</span>
+                <span className="selfrow__v">{c.magicTier}</span>
+              </div>
+              <div className="selfrow">
+                <span className="selfrow__k">剑术</span>
+                <span className="selfrow__v">
+                  {c.swordTier}
+                  {c.swordSchool !== "无" ? `（${c.swordSchool}）` : ""}
+                </span>
+              </div>
+              <div className="selfrow">
+                <span className="selfrow__k">冒险者</span>
+                <span className="selfrow__v">{c.adventurerRank}</span>
+              </div>
+              <div className="selfrow selfrow--muted">
+                <span className="selfrow__k">招式</span>
+                <span className="selfrow__v">
+                  {state.skills.length} 项 · 战力 {combatPower}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="panel">
+            <div className="panel__head">
+              <span>主线</span>
+              <span className="panel__tools">
+                <button type="button" className="btn btn--xs" onClick={() => onOpenDetail("mainline")}>
+                  卷宗 →
+                </button>
+              </span>
+            </div>
+            <div className="panel__body">
+              {mainline ? (
+                <>
+                  <div className="selfrow">
+                    <span className="selfrow__k">
+                      {mainline.stageIndex + 1}/{mainline.stageCount}
+                    </span>
+                    <span className="selfrow__v" title={mainline.name}>
+                      {mainline.stage?.title ?? mainline.name}
+                    </span>
+                  </div>
+                  <div className="selfrow">
+                    <span className="selfrow__k">目标</span>
+                    <span className="selfrow__v" title={mainline.stage?.objective}>
+                      {mainline.stage?.objective ?? "——"}
+                    </span>
+                  </div>
+                  <div className="selfrow selfrow--muted">
+                    <span className="selfrow__k">任务</span>
+                    <span className="selfrow__v">
+                      {mainline.stage
+                        ? `${mainline.stage.quests.filter((q) => q.done).length} / ${mainline.stage.quests.length} 完成`
+                        : mainline.outcome ?? "——"}
+                      {mainline.deadlineLeft !== null ? ` · 期限还剩 ${mainline.deadlineLeft} 月` : ""}
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <p className="fieldset__note">这一局没有主线。自由地活。</p>
+              )}
             </div>
           </div>
         </div>
 
-        {/* 中：刚发生的事常驻在上，场景指令在中间滚，行动底栏常驻在下 */}
+        {/* 中：眼前的事 + 纪事 + 能做的事。屏幕剩下来的宽度全给这里 */}
         <div className="chronicle">
           {state.pendingTalk && (
             <div className="talkcard">
@@ -292,34 +386,6 @@ export default function GameScreen({
                   onSceneChange={setSceneId}
                   onCommand={onPreset}
                 />
-
-                <div className="divider" />
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  <button type="button" className="btn" onClick={onOpenSaves}>
-                    存档管理
-                  </button>
-                  <button type="button" className="btn" onClick={onOpenAchievements}>
-                    成就
-                  </button>
-                  <button type="button" className="btn" onClick={onOpenDifficulty}>
-                    难度
-                  </button>
-                  <button type="button" className={aiEnabled ? "btn btn--primary" : "btn"} onClick={onOpenAi}>
-                    {aiExhausted ? "AI 推演 · 已停止调用" : aiEnabled ? "AI 推演 · 已开启" : "AI 推演 · 未开启"}
-                  </button>
-                  <button type="button" className="btn" onClick={onOpenApi}>
-                    接口导入
-                  </button>
-                  <button type="button" className="btn" onClick={() => setModal("export")}>
-                    导出存档
-                  </button>
-                  <button type="button" className="btn" onClick={() => setModal("import")}>
-                    恢复存档
-                  </button>
-                  <button type="button" className="btn btn--ghost" onClick={() => setModal("restart")}>
-                    重新开始
-                  </button>
-                </div>
               </div>
             </div>
           </div>
@@ -340,13 +406,17 @@ export default function GameScreen({
                 className="btn btn--sm"
                 onClick={() => setModal("free")}
                 disabled={actionsBlocked}
-                title="预设指令之外的事，用自然语言写"
+                title={
+                  aiExhausted
+                    ? "AI 已停止调用（余额不足或本机硬上限用尽），这次改由本地引擎推演"
+                    : "预设指令之外的事，用自然语言写"
+                }
               >
-                自由行动{aiEnabled ? " · AI" : ""}
+                自由行动{aiExhausted ? " · AI 已停" : aiEnabled ? " · AI" : ""}
               </button>
               <button
                 type="button"
-                className="chip"
+                className="btn btn--sm btn--ghost"
                 onClick={() => onAction(QUICK_FALLBACK)}
                 disabled={actionsBlocked}
                 title="让时间往前走，这个月什么都不做"
@@ -362,166 +432,6 @@ export default function GameScreen({
                 关系网 · {state.relations.length}
               </button>
             </div>
-          </div>
-        </div>
-
-        {/* 右：面板 */}
-        <div className="game__col">
-          <div className="panel">
-            <div className="panel__head">状态面板</div>
-          <div className="panel__body">
-            <div className="tabs" role="tablist">
-              <button type="button" aria-current={tab === "tier"} onClick={() => setTab("tier")}>阶级</button>
-              <button type="button" aria-current={tab === "skill"} onClick={() => setTab("skill")}>
-                技能{state.skills.length > 0 ? ` ${state.skills.length}` : ""}
-              </button>
-              <button type="button" aria-current={tab === "faction"} onClick={() => setTab("faction")}>势力</button>
-              <button type="button" aria-current={tab === "thread"} onClick={() => setTab("thread")}>线索</button>
-            </div>
-
-            {tab === "tier" && (
-              <>
-                {tierBars.map((b) => (
-                  <div className="bar" key={b.label}>
-                    <div className="bar__top">
-                      <span className="bar__name">{b.label}</span>
-                      <span className="bar__val">{b.tier}</span>
-                    </div>
-                    <div className="bar__track">
-                      <div
-                        className={`bar__fill${b.tone === "teal" ? " bar__fill--teal" : ""}`}
-                        style={{ width: `${Math.round(b.progress)}%` }}
-                      />
-                    </div>
-                    <div className="bar__top" style={{ marginTop: 4 }}>
-                      <span className="bar__name" style={{ fontSize: 11 }}>距「{b.next}」</span>
-                      <span className="bar__val" style={{ fontSize: 11 }}>{Math.round(b.progress)} / 100</span>
-                    </div>
-                  </div>
-                ))}
-                <div className="divider" />
-                <div className="kv"><span className="kv__k">剑术流派</span><span className="kv__v">{c.swordSchool}</span></div>
-                <div className="kv"><span className="kv__k">血脉</span><span className="kv__v">{c.blood}</span></div>
-                <div className="kv"><span className="kv__k">契约</span><span className="kv__v">{c.contract}</span></div>
-                <div className="kv"><span className="kv__k">腐化</span><span className="kv__v">{c.corruption}</span></div>
-                <div className="divider" />
-                {state.stats.map((s) => (
-                  <div className="bar" key={s.key}>
-                    <div className="bar__top">
-                      <span className="bar__name">{s.label}</span>
-                      <span className="bar__val">{s.value}{s.unit && ` ${s.unit}`} / {s.max}</span>
-                    </div>
-                    <div className="bar__track">
-                      <div
-                        className={`bar__fill${s.tone === "teal" ? " bar__fill--teal" : ""}${s.tone === "crimson" ? " bar__fill--crimson" : ""}`}
-                        style={{ width: `${Math.min(100, (s.value / s.max) * 100)}%` }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </>
-            )}
-
-            {tab === "skill" && (
-              <>
-                {skillGroups.length === 0 ? (
-                  <p className="fieldset__note">
-                    还没有掌握任何成体系的招式。靠修炼类指令长期积累能领悟普通招式；
-                    高级招式只能靠特殊事件或强大角色亲自授予。
-                  </p>
-                ) : (
-                  skillGroups.map((g) => (
-                    <div className="skillgroup" key={g.school}>
-                      <div className="skillgroup__head">{g.school}</div>
-                      {g.items.map((sk) => (
-                        <div className="skill" key={sk.id}>
-                          <div className="skill__top">
-                            <span className="skill__name">{sk.name}</span>
-                            <span className={`skill__grade skill__grade--${sk.grade === "高级" ? "high" : "normal"}`}>
-                              {sk.grade}
-                            </span>
-                          </div>
-                          <div className="skill__desc">{sk.desc}</div>
-                          <div className="skill__power">战力权重 {sk.power}</div>
-                        </div>
-                      ))}
-                    </div>
-                  ))
-                )}
-                {state.skills.length > 0 && (
-                  <>
-                    <div className="divider" />
-                    <p className="fieldset__note">
-                      已学招式的战力权重之和为{" "}
-                      <b>{state.skills.reduce((sum, id) => sum + (skillById(id)?.power ?? 0), 0)}</b>
-                      ，战斗类指令会用它把胜负推向有利的一侧。
-                    </p>
-                  </>
-                )}
-              </>
-            )}
-
-            {tab === "faction" && (
-              <>
-                {state.factions.map((f) => (
-                  <div className="faction" key={f.name}>
-                    <span className="faction__n">{f.name}</span>
-                    <span className={`faction__v ${f.value >= 0 ? "faction__v--pos" : "faction__v--neg"}`}>
-                      {f.value >= 0 ? `+${f.value}` : f.value}
-                    </span>
-                  </div>
-                ))}
-                <p className="fieldset__note" style={{ marginTop: 10 }}>
-                  声望差值只代表该势力对你的态度，不代表你已进入其中。
-                </p>
-              </>
-            )}
-
-            {tab === "thread" && (
-              <>
-                <div className="thread">
-                  <span className="thread__label">人神</span>
-                  <span className="thread__val">{state.threads.humanGod}</span>
-                </div>
-                <div className="thread">
-                  <span className="thread__label">龙神</span>
-                  <span className="thread__val">{state.threads.dragonGod}</span>
-                </div>
-                {state.canon.length > 0 && (
-                  <>
-                    <div className="divider" />
-                    <div className="panel__head" style={{ border: "none", padding: "4px 0", fontSize: 13 }}>
-                      AI 自撰设定
-                    </div>
-                    {state.canon.map((line, i) => (
-                      <div className="thread" key={i}>
-                        <span className="thread__val">{line}</span>
-                      </div>
-                    ))}
-                    <p className="fieldset__note" style={{ marginTop: 8 }}>
-                      这些是模型自行发明并被记进存档的设定，只属于这一段人生。
-                    </p>
-                  </>
-                )}
-                <div className="divider" />
-                <p className="fieldset__note">
-                  人神只能诱导，无法强制。龙神的接触通常直接而简短。世界信息不会主动剧透，必须靠调查、推理、社交与观察。
-                </p>
-              </>
-            )}
-
-            {state.notices.length > 0 && (
-              <>
-                <div className="divider" />
-                <div className="panel__head" style={{ border: "none", padding: "4px 0", fontSize: 13 }}>系统记录</div>
-                {state.notices.slice(-3).map((n, i) => (
-                  <div className="thread" key={i}>
-                    <span className="thread__val">{n}</span>
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
           </div>
         </div>
       </div>
