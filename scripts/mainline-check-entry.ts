@@ -13,7 +13,7 @@ import { MAINLINES, MAINLINE_EVENTS, RUDEUS_MAINLINE } from "../src/data/mainlin
 import { validateMainlines } from "../src/data/mainlines/validate";
 import type { MainlineDef } from "../src/data/mainlines/types";
 import { DECISION_EVENTS, eventById } from "../src/engine/events";
-import { advanceMonth, createGameState, relocate, relocationOptions, resolveAction, resolveEvent } from "../src/engine/world";
+import { advanceMonth, createGameState, parseSaveText, relocate, relocationOptions, resolveAction, resolveEvent } from "../src/engine/world";
 import { advanceMainline, applyMainlineFit, applyMainlineTune, mainlineView } from "../src/engine/mainline";
 import { checkCommand, commandAvailable, visibleScenes } from "../src/data/scenes";
 import { createEmptyDraft } from "../src/data/creation";
@@ -335,6 +335,32 @@ for (let i = 0; i < ALL.length; i += 1) {
   if (closed.mainline?.outcome !== "未竟") problems.push("[AI] ending 没有收束这条线");
   const closedView = mainlineView(closed);
   if (!closedView?.outcome) problems.push("[AI] 收束之后视图里读不到结果");
+}
+
+/* ---------- 7. 旧存档兼容：没有主线字段的档要照常读得回来 ---------- */
+
+{
+  const state = createGameState(
+    { ...createEmptyDraft(), name: "旧档测试者", mainlineMode: "随机" },
+    { mainlineId: MAINLINES[0].id },
+  );
+  // 造一份「主线系统之前」的存档：主线、自撰设定、场景增量这三个字段都不存在
+  const legacy = JSON.parse(JSON.stringify(state)) as Record<string, unknown>;
+  delete legacy.mainline;
+  delete legacy.canon;
+  delete legacy.customScenes;
+  const loaded = parseSaveText(JSON.stringify({ version: 1, savedAt: new Date().toISOString(), state: legacy }));
+  if (!loaded) {
+    problems.push("[兼容] 去掉 mainline/canon/customScenes 的旧存档读不回来");
+  } else {
+    if (loaded.mainline) problems.push("[兼容] 旧存档读回来却凭空多出一条主线");
+    if (loaded.log.length === 0) problems.push("[兼容] 旧存档读回来纪事是空的");
+    if (!loaded.character?.name) problems.push("[兼容] 旧存档读回来角色信息丢了");
+    if (mainlineView(loaded) !== null) problems.push("[兼容] 没有主线的存档不该有主线视图");
+    notes.push(
+      `旧存档兼容：删掉 mainline/canon/customScenes 三个字段后仍能读回（纪事 ${loaded.log.length} 条、关系 ${loaded.relations.length} 人、属性 ${loaded.stats.length} 项）`,
+    );
+  }
 }
 
 
