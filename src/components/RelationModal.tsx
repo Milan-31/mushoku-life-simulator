@@ -46,6 +46,8 @@ interface Props {
   /** 手动开关同行：只在他此刻就在跟前时才问得出口 */
   onCompanion: (name: string, on: boolean) => void;
   onClose: () => void;
+  /** 作为详情页的内容渲染时不套弹窗外壳，页面壳由 DetailScreen 负责 */
+  inline?: boolean;
 }
 
 /**
@@ -111,7 +113,7 @@ function layoutNodes(list: Relation[]): { rel: Relation; x: number; y: number; b
  * 关系网。玩家在正中，宁外按亲疏铺开；人物之间还有一层原作关系，用金色虚线画出来。
  * 除了看，这里也是动手的地方：点节点或列表里的按钮都能推进这段关系。
  */
-export default function RelationModal({ state, busy, aiReady, onTalk, onInteract, onCompanion, onClose }: Props) {
+export default function RelationModal({ state, busy, aiReady, onTalk, onInteract, onCompanion, onClose, inline }: Props) {
   const holder = useRef<HTMLDivElement | null>(null);
   const chart = useRef<echarts.ECharts | null>(null);
   const [filter, setFilter] = useState<RelationBond | "全部">("全部");
@@ -302,18 +304,8 @@ export default function RelationModal({ state, busy, aiReady, onTalk, onInteract
 
   const shown = filter === "全部" ? visible : visible.filter((r) => (r.bond ?? "熟人") === filter);
 
-  return (
-    <Modal
-      title={`关系网 · ${state.relations.length} 位相识`}
-      wide
-      onClose={onClose}
-      actions={
-        <button type="button" className="btn btn--primary" onClick={onClose}>
-          关闭
-        </button>
-      }
-    >
-      <div className="relmap">
+  const body = (
+    <div className="relmap">
         <div className="relmap__chart">
           <div ref={holder} className="relmap__canvas" />
           <p className="fieldset__note" style={{ textAlign: "center" }}>
@@ -530,6 +522,23 @@ export default function RelationModal({ state, busy, aiReady, onTalk, onInteract
           </div>
         </div>
       </div>
+  );
+
+  // 作为详情页的内容时，页面壳（标题、返回按钮、滚动容器）由 DetailScreen 提供
+  if (inline) return body;
+
+  return (
+    <Modal
+      title={`关系网 · ${state.relations.length} 位相识`}
+      wide
+      onClose={onClose}
+      actions={
+        <button type="button" className="btn btn--primary" onClick={onClose}>
+          关闭
+        </button>
+      }
+    >
+      {body}
     </Modal>
   );
 }

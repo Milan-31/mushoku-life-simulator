@@ -9,8 +9,8 @@ import ApiPanel from "./components/ApiPanel";
 import AiPanel from "./components/AiPanel";
 import TalkPanel from "./components/TalkPanel";
 import type { TalkLine } from "./components/TalkPanel";
-import RelationModal from "./components/RelationModal";
 import CreationScreen from "./screens/CreationScreen";
+import DetailScreen from "./screens/DetailScreen";
 import EndingScreen from "./screens/EndingScreen";
 import GameScreen from "./screens/GameScreen";
 import RudeusScreen from "./screens/RudeusScreen";
@@ -18,6 +18,8 @@ import RulebookScreen from "./screens/RulebookScreen";
 import TitleScreen from "./screens/TitleScreen";
 import { createEmptyDraft } from "./data/creation";
 import { RUDEUS_DRAFT, RUDEUS_NAME, RUDEUS_OPENING, RUDEUS_RELATIONS, RUDEUS_START_YEAR } from "./data/rudeus";
+import { RUDEUS_MAINLINE_ID } from "./data/mainlines";
+import { applyMainlineFit, applyMainlineTune, mainlineView, needsInitialFit, needsYearlyTune } from "./engine/mainline";
 import { achievementById } from "./data/achievements";
 import { difficultyOf } from "./data/difficulty";
 import { commandById, checkCommand } from "./data/scenes";
@@ -50,6 +52,8 @@ import {
   remainingBudget,
   requestActionOutcome,
   requestEpilogue,
+  requestMainlineFit,
+  requestMainlineTune,
   requestTalk,
   requestTalkSettlement,
   requestWorldTurn,
@@ -57,7 +61,7 @@ import {
   saveAiConfig,
 } from "./engine/ai";
 import type { AiBalance, AiBudget, AiConfig } from "./engine/ai";
-import type { CreationDraft, Difficulty, GameState, View } from "./types";
+import type { CreationDraft, DetailKind, Difficulty, GameState, View } from "./types";
 
 /** 页面加载时读取 URL 里的导入参数，作为初始状态（一次性） */
 const URL_SAVE_RAW = readUrlImport(window.location.search);
@@ -69,6 +73,8 @@ export default function App() {
     INITIAL_IMPORT ? (INITIAL_IMPORT.deceased ? "ending" : "game") : "title",
   );
   const [returnView, setReturnView] = useState<View>("title");
+  /** 正在看的详情页。为 null 表示没在详情页里 */
+  const [detail, setDetail] = useState<DetailKind | null>(null);
   const [draft, setDraft] = useState<CreationDraft>(() => createEmptyDraft());
   const [game, setGame] = useState<GameState | null>(INITIAL_IMPORT);
   const [toast, setToastState] = useState<{ id: number; text: string } | null>(() =>
@@ -150,6 +156,7 @@ export default function App() {
     writeSlot("auto", state);
     setHasSave(true);
     setPanel(null);
+    setDetail(null);
     setView(state.deceased ? "ending" : "game");
   }, [applyGame]);
 
@@ -193,18 +200,9 @@ export default function App() {
     [announceGains, applyGame],
   );
 
-  const beginLife = useCallback(() => {
-    const state = createGameState(draft);
-    applyGame(state);
-    writeSlot("auto", state);
-    setHasSave(true);
-    setView("game");
-    notify(state.achievements.length > 0 ? "人生已经开始，第一项成就已经落袋。" : "人生已经开始。世界不会等你。");
-  }, [draft, notify, applyGame]);
-
   /**
    * 原作模式扮演：用写好的那份角色档案开局。
-   * 起点年份、初始关系网、开场纪事都由种子指定，
+   * 起点年份、初始关系网、开场纪事与这一局的主线都由种子指定，
    * 不走创建流程——那些值不是玩家选的，是他本来就有的。
    */
   const beginRudeusLife = useCallback(() => {
@@ -212,6 +210,7 @@ export default function App() {
       year: RUDEUS_START_YEAR,
       relations: RUDEUS_RELATIONS,
       openingLines: RUDEUS_OPENING,
+      mainlineId: RUDEUS_MAINLINE_ID,
     });
     applyGame(state);
     writeSlot("auto", state);
@@ -265,6 +264,82 @@ export default function App() {
   );
 
   /**
+   * 主线的两次 AI 介入，都从这里走：
+   * - 还没按主角改写过的（刚开局，或者开局时 AI 没开），补一次二次修改；
+   * - 又是一年、这一年还没微调过的，按这一年实际发生的事重新导一下方向。
+   * AI 不可用时整段跳过，主线照旧由本地引擎推进，不会卡住。
+   */
+  const ensureMainlineAi = useCallback(
+    async (state: GameState): Promise<GameState> => {
+      if (state.deceased || !isAiReady(aiConfig, loadBudget())) return state;
+      if (needsInitialFit(state)) {
+        const res = await requestMainlineFit(aiConfig, state);
+        syncBudget();
+        if (res.data) {
+          notify(`主线已经按${state.character.name}这个人重写了一遍。`);
+          return applyMainlineFit(state, res.data);
+        }
+        reportAi(res, "主线的二次修改");
+        return state;
+      }
+      if (needsYearlyTune(state)) {
+        const res = await requestMainlineTune(aiConfig, state);
+        syncBudget();
+        if (res.data) {
+          notify(`主线微调 · ${res.data.note}`);
+          return applyMainlineTune(state, res.data);
+        }
+        reportAi(res, "主线的年度微调");
+      }
+      return state;
+    },
+    [aiConfig, notify, reportAi, syncBudget],
+  );
+
+  /**
+   * 开始一段普通的人生。
+   *
+   * 创建存档的那一刻抽主线：引擎按主角的出身、时代、所在地、天赋加权，
+   * 从二十条里抽一条（选了「不介入」就不抽）。开场钩子与第一章会立刻写进纪事。
+   * 抽完立刻把这条线交给 AI 按这个人改写一遍——那条线是按一个通用的人写的，
+   * 这一步之后它才属于他。AI 没开（或没配好）时整段跳过，主线照旧由本地引擎推进。
+   */
+  const beginLife = useCallback(() => {
+    const state = createGameState(draft);
+    applyGame(state);
+    writeSlot("auto", state);
+    setHasSave(true);
+    setView("game");
+    const drawn = mainlineView(state);
+    notify(
+      drawn
+        ? `这一局的主线是「${drawn.name}」。${drawn.stage ? `第一章：${drawn.stage.title}` : ""}`
+        : state.achievements.length > 0
+          ? "人生已经开始，第一项成就已经落袋。"
+          : "人生已经开始。世界不会等你。",
+    );
+    if (!needsInitialFit(state) || !isAiReady(aiConfig, loadBudget())) return;
+    void (async () => {
+      setBusy(true);
+      try {
+        const res = await requestMainlineFit(aiConfig, state);
+        if (!res.data) {
+          reportAi(res, "主线的二次修改");
+          return;
+        }
+        const current = gameRef.current;
+        // 这段时间里玩家可能已经重开或推进过：只在同一条主线上叠改动
+        if (!current || current.deceased || current.mainline?.id !== state.mainline?.id) return;
+        notify("主线已经按这个人重写了一遍。");
+        commit(current, applyMainlineFit(current, res.data));
+      } finally {
+        syncBudget();
+        setBusy(false);
+      }
+    })();
+  }, [draft, notify, applyGame, aiConfig, commit, reportAi, syncBudget]);
+
+  /**
    * 推进一个月。只有「AI 剧情月」（本月玩家自由输入过）才交给模型推演世界动态；
    * 全程只用预设指令的月份不产生任何调用。
    */
@@ -274,7 +349,8 @@ export default function App() {
     try {
       const engaged = isAiMonth(game);
       const turn = engaged ? await requestWorldTurn(aiConfig, game) : { data: null, error: null };
-      const next = advanceMonth(game, turn.data);
+      const advanced = advanceMonth(game, turn.data);
+      const next = await ensureMainlineAi(advanced);
       const final = await rewriteEnding(next);
       const hadAchievement = commit(game, final);
       if (!hadAchievement) {
@@ -286,7 +362,7 @@ export default function App() {
       syncBudget();
       setBusy(false);
     }
-  }, [game, aiConfig, busy, commit, notify, rewriteEnding, reportAi, syncBudget]);
+  }, [game, aiConfig, busy, commit, notify, rewriteEnding, reportAi, syncBudget, ensureMainlineAi]);
 
   /** 预设指令：由本地引擎即时结算，不消耗 AI 额度，也不标记 AI 剧情月 */
   const handlePreset = useCallback(
@@ -557,6 +633,7 @@ export default function App() {
   const handleRestart = useCallback(() => {
     applyGame(null);
     setDraft(createEmptyDraft());
+    setDetail(null);
     setView("creation");
     notify("上一段人生已终止。");
   }, [notify, applyGame]);
@@ -564,6 +641,17 @@ export default function App() {
   const openRulebook = useCallback((from: View) => {
     setReturnView(from);
     setView("rulebook");
+  }, []);
+
+  /** 进某一块的详情页。回到「入世」时把详情状态清掉 */
+  const openDetail = useCallback((kind: DetailKind) => {
+    setDetail(kind);
+    setView("detail");
+  }, []);
+
+  const backToGame = useCallback(() => {
+    setDetail(null);
+    setView("game");
   }, []);
 
   return (
@@ -578,9 +666,13 @@ export default function App() {
             date={game ? formatDate(game.year, game.month) : undefined}
             onNavigate={(v) => {
               if (v === "rulebook") openRulebook(view);
-              else setView(v);
+              else {
+                // 从详情页回「入世」，顺便把详情状态清掉
+                if (v === "game") setDetail(null);
+                setView(v);
+              }
             }}
-            onAchievements={game ? () => setPanel("achievements") : undefined}
+            onAchievements={game && view !== "game" ? () => openDetail("achievements") : undefined}
             onSaves={game ? () => setPanel("saves") : undefined}
             onAi={() => setPanel("ai")}
             aiBalanceText={aiBalanceText}
@@ -619,18 +711,31 @@ export default function App() {
             onAction={handleAction}
             onRelocate={handleRelocate}
             onResolveEvent={handleResolveEvent}
-            onOpenRelations={() => setPanel("relations")}
+            onOpenRelations={() => openDetail("relations")}
+            onOpenDetail={openDetail}
             onAcceptTalk={acceptPendingTalk}
             onDismissTalk={dismissPendingTalk}
             onRestore={handleRestore}
             onExport={() => exportSaveText(game)}
             onRestart={handleRestart}
             onOpenSaves={() => setPanel("saves")}
-            onOpenAchievements={() => setPanel("achievements")}
             onOpenDifficulty={() => setPanel("difficulty")}
             onOpenApi={() => setPanel("api")}
             onOpenAi={() => setPanel("ai")}
             onViewEnding={() => setView("ending")}
+          />
+        )}
+
+        {view === "detail" && game && detail && (
+          <DetailScreen
+            kind={detail}
+            state={game}
+            busy={busy}
+            aiReady={aiUsable}
+            onBack={backToGame}
+            onInteract={handleInteract}
+            onCompanion={handleSetCompanion}
+            onTalk={openTalk}
           />
         )}
 
@@ -687,18 +792,6 @@ export default function App() {
           state={game}
           onImport={handleApiImport}
           onNotify={notify}
-          onClose={() => setPanel(null)}
-        />
-      )}
-
-      {panel === "relations" && game && (
-        <RelationModal
-          state={game}
-          busy={busy}
-          aiReady={aiUsable}
-          onTalk={openTalk}
-          onInteract={handleInteract}
-          onCompanion={handleSetCompanion}
           onClose={() => setPanel(null)}
         />
       )}

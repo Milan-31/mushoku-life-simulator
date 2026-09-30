@@ -13,12 +13,14 @@ const KIND_LABEL: Record<string, string> = {
   achievement: "成就",
   ending: "终章",
   rumor: "传闻",
+  mainline: "主线",
 };
 
 /** 一年的总结。数字来自年鉴里那几条事件 */
 function headline(view: YearView): string {
   const count = (kind: string) => view.events.filter((e) => e.kind === kind).length;
   const parts: string[] = [];
+  if (count("mainline") > 0) parts.push(`${count("mainline")} 段主线`);
   if (count("choice") > 0) parts.push(`${count("choice")} 次抉择`);
   if (count("achievement") > 0) parts.push(`${count("achievement")} 项成就`);
   if (count("action") > 0) parts.push(`${count("action")} 件自己做的事`);
@@ -70,8 +72,8 @@ export default function Chronicle({ state }: Props) {
       if (max === 0) return;
       // 正文自己可以滚动时（世界动态那一类长条目）就别抢滚轮
       const target = e.target as HTMLElement | null;
-      const lines = target?.closest?.(".entry__lines") as HTMLElement | null;
-      if (lines && lines.scrollHeight > lines.clientHeight + 2) return;
+      const scroller = target?.closest?.(".chronicle__entryscroll") as HTMLElement | null;
+      if (scroller && scroller.scrollHeight > scroller.clientHeight + 2) return;
       e.preventDefault();
       const now = Date.now();
       if (now - lastStep.current < 130) return; // 抑制触控板的连续抖动
@@ -134,26 +136,29 @@ export default function Chronicle({ state }: Props) {
                 </div>
               </div>
 
-              <article className="entry entry--solo" key={entry.id}>
-                <span className={`entry__dot entry__dot--${entry.kind}`} />
-                <div className="entry__head">
-                  <span className={`entry__kind entry__kind--${entry.kind}`}>
-                    {KIND_LABEL[entry.kind] ?? "纪事"}
-                  </span>
-                </div>
-                <div className="entry__title">{entry.title}</div>
-                <div className="entry__lines">
-                  {entry.lines.map((l, i) => (
-                    <p key={i}>{l}</p>
-                  ))}
-                  {entry.rumor && (
-                    <p>
-                      <em>【可获知的传闻】</em>
-                      {entry.rumor}
-                    </p>
-                  )}
-                </div>
-              </article>
+              {/* 正文单独一层滚动容器：时间轴与翻页按钮留在原位，长条目在这里面滚 */}
+              <div className="chronicle__entryscroll">
+                <article className="entry entry--solo" key={entry.id}>
+                  <span className={`entry__dot entry__dot--${entry.kind}`} />
+                  <div className="entry__head">
+                    <span className={`entry__kind entry__kind--${entry.kind}`}>
+                      {KIND_LABEL[entry.kind] ?? "纪事"}
+                    </span>
+                  </div>
+                  <div className="entry__title">{entry.title}</div>
+                  <div className="entry__lines">
+                    {entry.lines.map((l, i) => (
+                      <p key={i}>{l}</p>
+                    ))}
+                    {entry.rumor && (
+                      <p>
+                        <em>【可获知的传闻】</em>
+                        {entry.rumor}
+                      </p>
+                    )}
+                  </div>
+                </article>
+              </div>
 
               <div className="chronicle__nav">
                 <button type="button" className="btn btn--sm" onClick={() => step(-1)} disabled={cursor === 0}>
