@@ -40,6 +40,12 @@
   --radius: 4px;
   --radius-lg: 8px;
 
+  /* 间距尺度。中间栏的紧—松节奏都从这里取，不再出现一次性的数值：
+     相关的凑近（tight），一栏之内的区块（gap），互不相干的段落之间（loose） */
+  --gap-tight: 8px;
+  --gap: 12px;
+  --gap-loose: 16px;
+
   --serif: "Noto Serif SC", "Songti SC", "STSong", "Source Han Serif SC", serif;
   --sans: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
 }
@@ -228,6 +234,31 @@ p { margin: 0; }
 .topbar__balance--warn { border-color: var(--line-strong); background: rgba(212, 162, 76, 0.16); color: var(--text-dim); }
 .topbar__balance--warn b { color: var(--gold); }
 .topbar__balance--warn svg { color: var(--gold); }
+/* 设置：规则手册与 AI 推演都收在这个下拉里 */
+.topbar__menu { position: relative; }
+.topbar__menuBtn { display: inline-flex; align-items: center; gap: 6px; }
+.topbar__menuBtn svg { width: 14px; height: 14px; flex: 0 0 auto; }
+.topbar__menuBtn[aria-expanded="true"] { color: var(--gold-2); background: rgba(212, 162, 76, 0.12); }
+.topbar__menuPanel {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 30;
+  min-width: 164px; padding: 6px;
+  display: flex; flex-direction: column;
+  background: rgba(12, 16, 30, 0.97);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  animation: topbarMenuIn 0.16s ease both;
+}
+.topbar__menuPanel button {
+  width: 100%; text-align: left; padding: 9px 12px; font-size: 13px;
+  letter-spacing: 0.1em; color: var(--text-dim); border-radius: var(--radius);
+}
+.topbar__menuPanel button:hover { color: var(--gold-2); background: rgba(212, 162, 76, 0.1); }
+@keyframes topbarMenuIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
 
 /* ============================================================
    标题页
@@ -442,7 +473,7 @@ p { margin: 0; }
  * 只在三栏并排的宽度下启用（1180px 以下会压成一栏，那时仍按文档流滚动）。
  */
 .game__col { display: flex; flex-direction: column; gap: 16px; min-height: 0; }
-.chronicle { display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+.chronicle { display: flex; flex-direction: column; gap: var(--gap); min-height: 0; }
 .chronicle__panel { display: flex; flex-direction: column; min-height: 0; }
 .chronicle__scroll { display: flex; flex-direction: column; gap: 16px; min-height: 0; }
 /* 常驻底栏：永远一行，不换行。高度压到最小，空间全让给纪事 */
@@ -459,8 +490,8 @@ p { margin: 0; }
 }
 .chronicle__bar .quickrow > * { flex: 0 0 auto; }
 /* 主按钮吃掉多余宽度，整行铺满，尾巴不留豁口 */
-.chronicle__bar .chronicle__advance { flex: 1 1 auto; justify-content: center; }
-.chronicle__bar .chip { padding: 7px 12px; font-size: 12.5px; }
+.chronicle__bar .chronicle__advance { flex: 1 1 auto; justify-content: center; font-size: 14.5px; padding: 11px 20px; }
+.chronicle__bar .quickrow .btn--sm { font-size: 13px; padding: 8px 14px; }
 .freebox__head { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--gold-2); }
 
 @media (min-width: 1181px) {
@@ -553,14 +584,17 @@ p { margin: 0; }
 .yearbook__worldbody { margin-top: 8px; padding-left: 10px; border-left: 2px solid var(--line-soft); }
 .yearbook__worldbody p { font-size: 12px; color: var(--text-dim); line-height: 1.8; }
 
-.timeline { margin-bottom: 14px; }
-.timeline__range { width: 100%; accent-color: var(--gold); cursor: pointer; }
-.timeline__meta {
-  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
-  margin-top: 6px; font-size: 12px; color: var(--gold);
-  font-family: var(--serif); letter-spacing: 0.12em;
+/* 时间轴：日期、滑杆、进度并成一行。控件只占一条，正文才有地方 */
+.timeline { display: flex; align-items: center; gap: var(--gap); margin-bottom: var(--gap); }
+.timeline__date {
+  flex: 0 0 auto; white-space: nowrap;
+  font-size: 12.5px; color: var(--gold); font-family: var(--serif); letter-spacing: 0.12em;
 }
-.timeline__pos { color: var(--faint); letter-spacing: 0.04em; }
+.timeline__range { flex: 1 1 auto; min-width: 60px; accent-color: var(--gold); cursor: pointer; }
+.timeline__pos {
+  flex: 0 0 auto; white-space: nowrap;
+  font-size: 11.5px; color: var(--faint); letter-spacing: 0.04em;
+}
 
 .entry { position: relative; padding: 0 0 16px 22px; }
 .entry::before {
@@ -604,8 +638,10 @@ p { margin: 0; }
 .entry__kind--achievement { color: var(--teal); border-color: rgba(111, 179, 168, 0.5); }
 .entry__kind--ending { color: var(--crimson); border-color: rgba(176, 74, 82, 0.5); }
 
-.chronicle__nav { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
-.chronicle__hint { margin-top: 10px; font-size: 11.5px; color: var(--faint); letter-spacing: 0.04em; }
+.chronicle__nav {
+  display: flex; align-items: center; flex-wrap: nowrap; gap: var(--gap-tight);
+  margin-top: var(--gap);
+}
 
 .scrollpaper {
   border: 1px solid rgba(0, 0, 0, 0.25);
@@ -723,23 +759,27 @@ p { margin: 0; }
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-lg);
   background: linear-gradient(180deg, rgba(212, 162, 76, 0.12), rgba(212, 162, 76, 0.03));
-  padding: 18px 20px;
+  padding: 20px 22px;
   box-shadow: 0 0 30px rgba(212, 162, 76, 0.12);
   animation: eventIn 0.3s ease;
 }
 @keyframes eventIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
 .eventcard__kicker { font-size: 12px; letter-spacing: 0.24em; color: var(--gold); }
-.eventcard__title { font-size: 19px; color: #f4ecd8; margin: 6px 0 10px; }
-.eventcard__body p { font-size: 13.5px; color: var(--text-dim); line-height: 1.9; margin-bottom: 4px; }
-.eventcard__options { display: grid; gap: 10px; margin-top: 14px; }
+.eventcard__title { font-size: 20px; color: #f4ecd8; margin: 6px 0 10px; }
+.eventcard__body p { font-size: 14px; color: var(--text-dim); line-height: 1.85; margin-bottom: 4px; }
+.eventcard__options { display: grid; gap: var(--gap-tight); margin-top: 16px; }
 .eventcard__opt {
   text-align: left; border: 1px solid var(--line); border-radius: var(--radius);
-  background: rgba(255, 255, 255, 0.03); padding: 11px 14px; transition: all 0.16s;
+  background: rgba(255, 255, 255, 0.03); padding: 13px 16px; transition: all 0.16s;
 }
 .eventcard__opt:hover { border-color: var(--line-strong); background: rgba(212, 162, 76, 0.1); transform: translateX(2px); }
-.eventcard__opt-label { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--gold-2); }
-.eventcard__opt-detail { display: block; margin-top: 5px; font-size: 12.5px; color: var(--faint); line-height: 1.7; }
-.risk { font-size: 11px; letter-spacing: 0.08em; border-radius: 2px; padding: 1px 6px; border: 1px solid; }
+/* 选项名靠左、风险靠右：一眼扫下去就知道哪一条险 */
+.eventcard__opt-label {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  font-size: 15.5px; font-weight: 500; color: var(--gold-2);
+}
+.eventcard__opt-detail { display: block; margin-top: 5px; font-size: 13px; color: var(--faint); line-height: 1.7; }
+.risk { font-size: 12px; letter-spacing: 0.08em; border-radius: 2px; padding: 1px 7px; border: 1px solid; flex: 0 0 auto; }
 .risk--低 { color: var(--teal); border-color: rgba(111, 179, 168, 0.5); }
 .risk--中 { color: var(--gold-2); border-color: var(--line-strong); }
 .risk--高 { color: var(--crimson); border-color: rgba(176, 74, 82, 0.6); }
@@ -901,7 +941,7 @@ p { margin: 0; }
 /* ============================================================
    场景操作面板
    ============================================================ */
-.scene { display: flex; flex-direction: column; gap: 12px; }
+.scene { display: flex; flex-direction: column; gap: var(--gap-loose); }
 .scene__tabs { display: flex; flex-wrap: wrap; gap: 6px; }
 .scene__tab {
   background: rgba(255, 255, 255, 0.03);
@@ -918,20 +958,25 @@ p { margin: 0; }
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
 }
 .scene__desc {
-  font-size: 13px; color: var(--text-dim); line-height: 1.75;
+  font-size: 13px; color: var(--faint); line-height: 1.75;
   padding-left: 11px; border-left: 2px solid var(--line-soft);
 }
-.scene__group { display: flex; flex-direction: column; gap: 7px; }
+.scene__group { display: flex; flex-direction: column; gap: var(--gap-tight); }
+/* 分节标题：原来是极淡的小字，等于没有分节。加金色短竖线让它立起来 */
 .scene__groupname {
-  font-size: 11.5px; letter-spacing: 0.22em; color: var(--faint);
+  font-size: 12.5px; letter-spacing: 0.14em; color: var(--gold);
+  padding-left: 8px; border-left: 2px solid var(--line-strong); line-height: 1.4;
 }
-.scene__cmds { display: flex; flex-wrap: wrap; gap: 7px; }
+/* 指令按等宽网格排：一眼数得清这里有几件事可做，也不再是参差的碎片。
+   列宽下限要放得下常见的一条指令名，否则文字会被挤成两行 */
+.scene__cmds { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: var(--gap-tight); align-content: start; }
 .scenecmd {
-  display: inline-flex; flex-direction: column; align-items: flex-start; gap: 3px;
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; gap: 4px;
+  min-height: 54px;
   background: rgba(255, 255, 255, 0.025);
   border: 1px solid var(--line-soft);
   border-radius: var(--radius);
-  padding: 8px 12px; text-align: left; transition: all 0.16s;
+  padding: 10px 12px; text-align: left; transition: all 0.16s;
 }
 .scenecmd:hover:not(:disabled) {
   border-color: rgba(212, 162, 76, 0.42);
@@ -945,14 +990,24 @@ p { margin: 0; }
   background: rgba(255, 255, 255, 0.012);
 }
 .scenecmd--locked:disabled { opacity: 0.62; }
-.scenecmd__label { font-size: 13px; color: var(--text); }
+.scenecmd__label { font-size: 15px; color: var(--text); letter-spacing: 0.02em; line-height: 1.4; }
 .scenecmd--locked .scenecmd__label { color: var(--faint); }
-.scenecmd__cost { font-size: 11px; color: var(--faint); letter-spacing: 0.06em; }
+.scenecmd__cost { font-size: 12px; color: var(--faint); letter-spacing: 0.06em; }
 .scenecmd__cost--gain { color: var(--teal); }
 .scenecmd__lock {
-  font-size: 10.5px; line-height: 1.45; color: var(--gold-2);
-  max-width: 240px; letter-spacing: 0.02em;
+  font-size: 11.5px; line-height: 1.45; color: var(--gold-2); letter-spacing: 0.02em;
 }
+/* 指令说明：每个回合都重读一遍的长段落，收起来，需要时再展开 */
+.scene__help summary {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--faint); letter-spacing: 0.06em;
+  cursor: pointer; list-style: none; transition: color 0.16s;
+}
+.scene__help summary::-webkit-details-marker { display: none; }
+.scene__help summary::before { content: "？"; color: var(--gold-2); }
+.scene__help summary:hover { color: var(--text-dim); }
+.scene__help[open] summary { margin-bottom: 4px; }
+.scene__help .fieldset__note { margin-top: 0; }
 
 /* 自由行动区，与预设指令明确区分 */
 .freebox {
@@ -1103,8 +1158,8 @@ p { margin: 0; }
   animation: eventIn 0.3s ease;
 }
 .talkcard__kicker { font-size: 12px; letter-spacing: 0.2em; color: #8fbde6; }
-.talkcard__title { font-size: 18px; color: #e6eefa; margin: 6px 0 8px; }
-.talkcard__line { font-size: 13.5px; color: var(--text-dim); line-height: 1.9; }
+.talkcard__title { font-size: 19px; color: #e6eefa; margin: 6px 0 8px; }
+.talkcard__line { font-size: 14px; color: var(--text-dim); line-height: 1.85; }
 .talkcard__acts { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 13px; }
 
 /* ============================================================
@@ -1506,7 +1561,7 @@ p { margin: 0; }
 }
 .chronicle__body { flex: 1 1 auto; min-height: 0; }
 .chronicle__body.yearbook { overflow-y: auto; }
-.chronicle__nav, .chronicle__hint, .chronicle .timeline { flex: 0 0 auto; }
+.chronicle__nav, .chronicle .timeline { flex: 0 0 auto; }
 
 /* ============================================================
    全局过渡：高斯模糊式渐隐
@@ -1555,7 +1610,8 @@ p { margin: 0; }
   .title, .creation, .game, .detailpage, .rulebook, .ending,
   .detailpage__body > .panel, .detailpage__body > .relmap,
   .creation__stage > *:not(.creation__foot), .creation__foot,
-  .blur-swap, .eventcard, .talkcard, .toast, .pagenav, .modal__box {
+  .blur-swap, .eventcard, .talkcard, .toast, .pagenav, .modal__box,
+  .topbar__menuPanel {
     animation: none;
   }
 }

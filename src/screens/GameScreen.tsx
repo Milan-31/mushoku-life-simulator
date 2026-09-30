@@ -425,7 +425,7 @@ export default function GameScreen({
               </button>
               <button
                 type="button"
-                className="chip"
+                className="btn btn--sm btn--ghost"
                 onClick={() => onAction(QUICK_FALLBACK)}
                 disabled={actionsBlocked}
                 title="让时间往前走，这个月什么都不做"
