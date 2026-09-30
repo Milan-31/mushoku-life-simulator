@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, Milano, Yukimi]
+    branches: [main, Milano, Yukimi, Lazyawen]
   pull_request:
     branches: [main]
 
